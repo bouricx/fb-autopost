@@ -12,6 +12,10 @@ from .engine import Engine
 from . import manager
 from .queue_importer import parse
 
+from .browser_manager import BrowserManager
+from . import config as legacy_config, storage as legacy_storage
+browsers = BrowserManager()
+
 facebook = Facebook()
 engine = Engine(facebook)
 csrf = secrets.token_urlsafe(32)
@@ -24,6 +28,7 @@ async def lifespan(app):
     yield
     engine.stopped.set()
     await task
+    await browsers.shutdown()
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -133,5 +138,51 @@ def import_jobs(body: Import):
         return {'ids': [manager.create(**row) for row in rows]}
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+class BrowserAccount(BaseModel):
+    name: str = Field(min_length=1,max_length=80)
+class BrowserPost(BaseModel):
+    account_id: str = Field(max_length=80)
+    urls: list[str] = Field(min_length=1,max_length=20)
+    message: str = Field(min_length=1,max_length=10000)
+    delay: int = Field(default=60,ge=30,le=3600)
+
+@app.get('/api/browser/state')
+def browser_state():
+    return {'accounts':browsers.accounts(),'logs':browsers.logs}
+
+@app.post('/api/browser/accounts')
+async def browser_add(body: BrowserAccount):
+    return await browsers.add(body.name)
+
+@app.get('/api/browser/groups/{aid}')
+def saved_groups(aid: str):
+    try:browsers.account(aid)
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    return legacy_storage.read_joined_groups(aid)
+
+@app.post('/api/browser/accounts/{aid}/{action}')
+async def browser_action(aid: str,action: str):
+    try:
+        browsers.account(aid)
+        if action=='login':await browsers.login(aid)
+        elif action=='check':return {'logged_in':await browsers.check(aid)}
+        elif action=='groups':return {'groups':await browsers.groups(aid)}
+        elif action=='stop':await browsers.stop(aid)
+        elif action=='close':await browsers.close(aid)
+        else:raise ValueError('ไม่รู้จักคำสั่ง')
+        return {'ok':True}
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    except Exception:raise HTTPException(400,'ทำรายการไม่สำเร็จ ตรวจ Chrome และหน้า Facebook แล้วลองใหม่')
+
+@app.post('/api/browser/post/{mode}')
+async def browser_post(mode: str,body: BrowserPost):
+    try:
+        if mode=='draft':await browsers.draft(body.account_id,body.urls[0],body.message)
+        elif mode=='start':await browsers.start(body.account_id,body.urls,body.message,body.delay)
+        else:raise ValueError('ไม่รู้จักโหมด')
+        return {'ok':True}
+    except ValueError as exc:raise HTTPException(400,str(exc))
+    except Exception:raise HTTPException(400,'เตรียมโพสต์ไม่สำเร็จ ตรวจ Facebook หรือหน้าสร้างโพสต์')
 
 app.mount('/assets', StaticFiles(directory=ROOT / 'ui'), name='assets')
