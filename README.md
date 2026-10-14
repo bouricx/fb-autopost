@@ -69,4 +69,6 @@ sfx.c เป็นตัวแตกแพ็กเกจ Windows, launcher.c �
 และ EXE payload ผ่าน ไม่มีบัญชี/รหัสผ่าน/cookiesจริงในชุดทดสอบ
 ตรวจ UI ใน Chromium ด้วยข้อมูลทดสอบ: รูป/รูปเสีย ค้นหา เลือกกลุ่ม สลับบัญชี
 โหลด cache ใหม่ โหมดสว่าง/มืด และหน้าจอมือถือ (python scripts/check_ui.py)
-ยังไม่ได้รัน EXE บน Windows จริงหรือทดสอบ selectors กับบัญชี Facebook จริง
+ตรวจหน้าต่าง WebView2 จริงบน GitHub Windows runner ด้วย runtime ที่บันเดิล:
+แสดง UI รุ่น Desktop และเปิดได้เมื่อพอร์ตถูกใช้อยู่
+ยังไม่ได้ทดสอบตัวแตกไฟล์ EXE บนเครื่องผู้ใช้หรือ selectors กับบัญชี Facebook จริง

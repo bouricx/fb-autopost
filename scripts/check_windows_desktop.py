@@ -5,7 +5,9 @@ import tempfile
 import threading
 from pathlib import Path
 
-with tempfile.TemporaryDirectory() as tmp:
+# WebView2 releases its profile lock asynchronously after window.destroy().
+# The hosted runner discards this isolated directory at job completion.
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     os.environ['FBAUTO_USER_DIR']=str(Path(tmp)/'profile')
     os.environ['FBAUTO_DATA']=str(Path(tmp)/'queue')
     import webview
