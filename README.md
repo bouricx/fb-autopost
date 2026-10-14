@@ -1,3 +1,31 @@
+# FB AutoPost 1.1 — วิธีใช้แบบง่าย
+
+[ดาวน์โหลดโปรแกรม .exe](https://github.com/bouricx/fb-autopost/raw/refs/heads/main/downloads/FB-AutoPost-Setup.exe)
+
+1. ใช้ Windows 10/11 แบบ x64 แล้วดาวน์โหลด FB-AutoPost-Setup.exe
+2. ดับเบิลคลิก รอแตกไฟล์ครั้งแรก โปรแกรมจะเปิดหน้าจอในเบราว์เซอร์
+3. ใน Meta Graph API Explorer เลือก Meta App ของคุณแล้วสร้าง User Access Token
+   พร้อมสิทธิ์ pages_show_list, pages_read_engagement, pages_manage_posts
+4. วางโทเคนในช่อง “User Access Token” กด “ค้นหาเพจของฉัน” แล้วเลือกเพจ
+5. เขียนข้อความ/ใส่ลิงก์ เลือกเวลา แล้วกด “เพิ่มเข้าคิว”
+   หรือกด “ตั้งเป็นโพสต์ทันที” ก่อนเพิ่มเข้าคิว
+6. เปิดโปรแกรมและคอมค้างไว้ โปรแกรมไม่ได้ทำงานเมื่อปิดหน้าต่างคำสั่ง
+
+ไม่ต้องติดตั้ง Python ไม่ต้องกรอกรหัสผ่าน Facebook ในโปรแกรม โทเคนอยู่ใน
+หน่วยความจำจนปิดโปรแกรม เปิดใหม่ต้องเชื่อมต่อเพจใหม่ Meta App ต้องได้รับสิทธิ์
+ที่เหมาะสมตามบทบาทและการอนุมัติของ Meta การค้นหาเพจไม่ได้เพิ่มสิทธิ์ให้บัญชี
+ถ้ามี Page Token อยู่แล้ว ใช้ช่องเชื่อมต่อ Page ID + Page Token ได้เช่นเดิม
+
+EXE แตกแอปไว้ที่ %LOCALAPPDATA%\FB-AutoPost\v1.1.0\FB-AutoPost
+ข้อมูลคิวอยู่ใน app/data ของโฟลเดอร์นั้น ไม่ได้มีระบบอัปเดตอัตโนมัติ
+Windows PowerShell ที่มากับ Windows ใช้แตก ZIP ภายใน EXE ไม่ดาวน์โหลดโค้ดเพิ่ม
+
+ทดสอบคิวและการค้นหาเพจด้วยข้อมูลจำลองแล้ว ตรวจไฟล์ EXE และ ZIP แล้ว
+ยังไม่ได้ทดสอบรันจริงบน Windows หรือส่งโพสต์ไป Facebook จริง
+รองรับโพสต์ข้อความ/ลิงก์ลง Page ไม่รองรับโพสต์กลุ่ม/บัญชีส่วนตัว/ดันคอมเมนต์
+
+---
+
 # Download Windows program
 
 [Download FB AutoPost for Windows x64](https://github.com/bouricx/fb-autopost/raw/refs/heads/main/downloads/FB-AutoPost-Windows-x64.zip)

@@ -72,6 +72,28 @@ async def connect(body: Account):
     except Exception:
         raise HTTPException(502, 'Facebook connection unavailable.')
 
+class Discovery(BaseModel):
+    token: str = Field(min_length=1, max_length=4096)
+
+@app.post('/api/discover')
+async def discover(body: Discovery):
+    facebook.candidates.clear()
+    try:
+        return {'pages': await facebook.discover(body.token)}
+    except Exception:
+        facebook.candidates.clear()
+        raise HTTPException(400, 'ค้นหาเพจไม่สำเร็จ ตรวจ User Access Token และสิทธิ์ pages_show_list')
+
+@app.post('/api/select/{page_id}')
+async def select_page(page_id: str):
+    row = facebook.candidates.get(page_id)
+    if not row:
+        raise HTTPException(400, 'ค้นหาเพจใหม่ก่อนเลือก')
+    try:
+        return await facebook.connect(page_id, row['token'])
+    except Exception:
+        raise HTTPException(400, 'เชื่อมต่อเพจไม่สำเร็จ ตรวจสิทธิ์เพจ')
+
 @app.delete('/api/pages/{page_id}')
 def disconnect(page_id: str):
     facebook.tokens.pop(page_id, None)

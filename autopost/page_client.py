@@ -10,6 +10,7 @@ class PublishError(Exception):
 
 class Facebook:
     def __init__(self):
+        self.candidates = {}
         self.tokens = {}  # Memory only. Tokens are never returned to the UI or database.
         self.lock = asyncio.Lock()
 
@@ -26,6 +27,28 @@ class Facebook:
             raise ValueError('Token did not return the requested Page.')
         self.tokens[page_id] = {'token': token.strip(), 'name': data.get('name', page_id)}
         return {'id': page_id, 'name': self.tokens[page_id]['name']}
+
+    async def discover(self, token):
+        # Use cursor values rather than provider next URLs containing tokens.
+        pages = []
+        after = None
+        async with httpx.AsyncClient(timeout=30) as client:
+            for _ in range(10):
+                params = {'fields': 'id,name,access_token,tasks', 'limit': 100}
+                if after:
+                    params['after'] = after
+                response = await client.get(f'https://graph.facebook.com/{VERSION}/me/accounts',
+                    params=params, headers={'Authorization': 'Bearer ' + token.strip()})
+                data = self._response(response)
+                for row in data.get('data', []):
+                    pid = str(row.get('id', ''))
+                    if pid.isdigit() and row.get('access_token'):
+                        self.candidates[pid] = {'token': row['access_token'], 'name': row.get('name', pid)}
+                        pages.append({'id': pid, 'name': row.get('name', pid)})
+                after = data.get('paging', {}).get('cursors', {}).get('after')
+                if not data.get('paging', {}).get('next') or not after:
+                    break
+        return pages
 
     @staticmethod
     def _response(response):

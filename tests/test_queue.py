@@ -28,6 +28,19 @@ class QueueTests(unittest.TestCase):
  def test_crash_is_uncertain(self):
   manager.create('123','Hello','','2020-01-01T00:00:00Z');storage.claim_due();storage.init()
   self.assertEqual(storage.list_jobs()[0]['status'],'uncertain')
+ def test_discovery_keeps_page_tokens_private(self):
+  import httpx
+  from autopost.page_client import Facebook
+  from unittest.mock import AsyncMock
+  response=httpx.Response(200,json={'data':[{'id':'123','name':'My Page','access_token':'secret-page-token'}]})
+  client=AsyncMock();client.get.return_value=response
+  with patch('autopost.page_client.httpx.AsyncClient') as factory:
+   factory.return_value.__aenter__.return_value=client
+   facebook_client=Facebook()
+   result=asyncio.run(facebook_client.discover('user-token'))
+  self.assertEqual(result,[{'id':'123','name':'My Page'}])
+  self.assertNotIn('secret-page-token',str(result))
+  self.assertEqual(facebook_client.candidates['123']['token'],'secret-page-token')
  def test_validation(self):
   for link in ['javascript:alert(1)','https://user:pass@example.com']:
    with self.assertRaises(ValueError):manager.create('123','Hello',link,'2020-01-01T00:00:00Z')
