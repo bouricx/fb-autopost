@@ -1,0 +1,2 @@
+playwright>=1.40.0
+pywebview>=5.1.0
