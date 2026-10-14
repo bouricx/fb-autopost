@@ -1,6 +1,6 @@
 """Package the current source with an existing Windows embedded-Python bundle.
 Example:
-  zig cc -target x86_64-windows-gnu -municode -O2 sfx.c -o sfx-base.exe
+  zig cc -target x86_64-windows-gnu -municode -Wl,--subsystem,windows -O2 sfx.c -o sfx-base.exe
   python scripts/package_windows.py --bundle-root /path/FB-AutoPost --launcher sfx-base.exe
 The bundle must contain runtime/python.exe, installed Windows wheels and the
 inner FB-AutoPost.exe launcher. No installed account data is copied into releases.

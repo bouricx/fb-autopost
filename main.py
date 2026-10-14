@@ -1,10 +1,14 @@
-import threading
-import webbrowser
-import uvicorn
-from autopost.runtime_config import PORT
+import sys
+from autopost.config import STATE_DIR
+from autopost.desktop import run_desktop, report_error
 
 if __name__ == '__main__':
-    print(f'FB AutoPost: http://127.0.0.1:{PORT}')
-    print('Keep this window open for scheduled jobs. Ctrl+C stops the app.')
-    threading.Timer(2, lambda: webbrowser.open(f'http://127.0.0.1:{PORT}')).start()
-    uvicorn.run('autopost.api:app', host='127.0.0.1', port=PORT, access_log=False)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    if sys.stdout is None or sys.stderr is None:
+        log = open(STATE_DIR / 'desktop-startup.log', 'a', encoding='utf-8', buffering=1)
+        sys.stdout = sys.stderr = log
+    try:
+        run_desktop()
+    except Exception as error:
+        report_error(error)
+        raise SystemExit(1)

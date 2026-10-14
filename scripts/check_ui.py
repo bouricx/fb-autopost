@@ -33,6 +33,8 @@ async def check(server,out):
         assert by_name['Gamma Group']['image_url'].endswith('gamma.jpg')
         await page.route('https://*.fbcdn.net/**',lambda route:route.fulfill(status=200,content_type='image/svg+xml',body='<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="20" fill="#b9c9bc"/><path d="M0 100 40 45 80 90 100 60 120 100" fill="#74998a"/></svg>'))
         await page.goto('http://127.0.0.1:8765/')
+        await page.evaluate("localStorage.setItem('fb-theme','light')")
+        await page.reload()
         await page.get_by_text('เชื่อมต่อบนเครื่องแล้ว',exact=True).wait_for()
         assert await page.get_by_text('เพิ่มบัญชีแรกของคุณ',exact=True).count()==1
         await page.locator('#add input').fill('Veltshop')

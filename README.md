@@ -1,6 +1,15 @@
-# FB AutoPost 1.3 — Liquid Glass
+# FB AutoPost 1.3.1 — Desktop
 
 [ดาวน์โหลด FB-AutoPost-Setup.exe](https://github.com/bouricx/fb-autopost/raw/refs/heads/main/downloads/FB-AutoPost-Setup.exe)
+
+## ใหม่ในรุ่น 1.3.1
+เปิดเป็นหน้าต่าง Desktop ด้วย WebView2 ไม่มีแท็บหน้าจัดการใน Chrome
+แก้พอร์ต 8765 ชน: จองพอร์ตว่างและรอ server พร้อมก่อนเปิดหน้าต่าง
+เปิดซ้ำรุ่นเดียวกันจะกลับไปหน้าต่างเดิม ไม่เปิด server ซ้อน
+ปิดหน้าต่างแล้วระบบสั่งหยุดงาน พอร์ตภายในไม่ต้องกรอกเอง
+หากเครื่องไม่มี Microsoft Edge WebView2 Runtime ให้ติดตั้งจาก Microsoft ก่อน
+(https://developer.microsoft.com/microsoft-edge/webview2/)
+ล็อกอินและโพสต์ Facebook ยังเปิด Chrome แยกตามบัญชีตามเดิม
 
 ## ใหม่ในรุ่น 1.3
 หน้าจอ Liquid Glass แยกบัญชี / กลุ่ม / เขียนโพสต์ / ประวัติ พร้อมโหมดสว่างและมืด
@@ -11,7 +20,7 @@
 
 ## ใช้บน Windows 10/11 x64
 1. ติดตั้ง Google Chrome ให้เรียบร้อย (https://www.google.com/chrome/)
-2. ดาวน์โหลด EXE แล้วดับเบิลคลิก รอแตกไฟล์ครั้งแรกและเปิดหน้าจอในเบราว์เซอร์
+2. ดาวน์โหลด EXE แล้วดับเบิลคลิก รอแตกไฟล์ครั้งแรกแล้วเปิดหน้าต่างโปรแกรม FB AutoPost โดยตรง
 3. พิมพ์ชื่อบัญชี เช่น Veltshop แล้วกด เพิ่มบัญชี → ล็อกอิน
 4. Chrome หน้าต่างแยกเปิด facebook.com ให้เข้าสู่ระบบบน Facebook เอง รวมถึง 2FA
 5. กลับโปรแกรมแล้วกด ตรวจล็อกอิน สถานะ “พบเซสชันล็อกอิน” เป็นการตรวจ cookie
@@ -37,7 +46,7 @@ Discord user-token แบบโปรแกรมในคลิป ระบบ
 ในหน้าจอหลักของ Browser Edition เว็บ API โหมดเดิมยังต้องใช้โทเคน
 
 ## ที่เก็บข้อมูล
-EXE แตกไฟล์ใน %LOCALAPPDATA%\FB-AutoPost\v1.3.0\FB-AutoPost
+EXE แตกไฟล์ใน %LOCALAPPDATA%\FB-AutoPost\v1.3.1\FB-AutoPost
 บัญชีและโปรไฟล์ใหม่เก็บที่ %LOCALAPPDATA%\FB-AutoPost\user-data
 หากพบข้อมูลรุ่น 1.2 อยู่ก่อน โปรแกรมจะใช้โฟลเดอร์ app ของรุ่น 1.2 ต่อ
 เพื่อรักษาบัญชีและเซสชันเดิม กรุณาอย่าลบโฟลเดอร์เดิมนี้
@@ -56,7 +65,7 @@ browser.py ปรับให้เปิด Chrome แบบมองเห็�
 browser_manager.py เชื่อมการทำงานกับ api.py และ UI ใหม่
 sfx.c เป็นตัวแตกแพ็กเกจ Windows, launcher.c เป็นตัวเปิด Python ที่บันเดิล
 
-การตรวจ: unit tests 17 รายการผ่านด้วย mock client/browser; Python/JS syntax
+การตรวจ: unit tests 19 รายการผ่านด้วย mock client/browser; Python/JS syntax
 และ EXE payload ผ่าน ไม่มีบัญชี/รหัสผ่าน/cookiesจริงในชุดทดสอบ
 ตรวจ UI ใน Chromium ด้วยข้อมูลทดสอบ: รูป/รูปเสีย ค้นหา เลือกกลุ่ม สลับบัญชี
 โหลด cache ใหม่ โหมดสว่าง/มืด และหน้าจอมือถือ (python scripts/check_ui.py)

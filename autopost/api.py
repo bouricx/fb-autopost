@@ -24,7 +24,7 @@ csrf = secrets.token_urlsafe(32)
 @asynccontextmanager
 async def lifespan(app):
     init()
-    engine.stopped.clear()
+    engine.stopped = asyncio.Event()
     task = asyncio.create_task(engine.run())
     yield
     engine.stopped.set()
