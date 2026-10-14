@@ -11,6 +11,7 @@ from .page_client import Facebook, PublishError
 from .engine import Engine
 from . import manager
 from .queue_importer import parse
+from . import message_profiles
 
 from .browser_manager import BrowserManager
 from .group_metadata import normalize_group
@@ -147,6 +148,37 @@ class BrowserPost(BaseModel):
     urls: list[str] = Field(min_length=1,max_length=20)
     message: str = Field(min_length=1,max_length=10000)
     delay: int = Field(default=60,ge=30,le=3600)
+
+class MessageProfile(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    message: str = Field(min_length=1, max_length=10000)
+
+class ProfileAssignment(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=500)
+    profile_id: str = Field(default='', max_length=80)
+
+@app.get('/api/browser/profiles/{aid}')
+def profiles_get(aid: str):
+    try:
+        browsers.account(aid)
+        return message_profiles.load(aid)
+    except ValueError as exc: raise HTTPException(400, str(exc))
+
+@app.post('/api/browser/profiles/{aid}')
+def profiles_create(aid: str, body: MessageProfile):
+    try:
+        browsers.account(aid)
+        return message_profiles.create(aid, body.name, body.message)
+    except ValueError as exc: raise HTTPException(400, str(exc))
+
+@app.put('/api/browser/profiles/{aid}')
+def profiles_assign(aid: str, body: ProfileAssignment):
+    try:
+        browsers.account(aid)
+        urls = [browsers.group_url(url).rstrip('/') + '/' for url in body.urls]
+        message_profiles.assign(aid, urls, body.profile_id)
+        return {'ok': True}
+    except ValueError as exc: raise HTTPException(400, str(exc))
 
 @app.get('/api/browser/state')
 def browser_state():

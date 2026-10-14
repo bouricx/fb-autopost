@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="th" data-theme="dark">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FB AutoPost 1.3.1 · Desktop</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FB AutoPost 1.3.1 · Desktop</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/app.js" defer></script><script src="/assets/pages.js" defer></script></head>
 <body>
 <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
 <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
@@ -25,6 +25,8 @@
 <button data-view="accounts" aria-current="page"><svg class="icon"><use href="#i-users"/></svg><span>บัญชี Facebook</span><span id="account-count" class="nav-count">0</span></button>
 <button data-view="groups"><svg class="icon"><use href="#i-grid"/></svg><span>กลุ่มของฉัน</span><span id="group-count" class="nav-count">0</span></button>
 <button data-view="compose"><svg class="icon"><use href="#i-edit"/></svg><span>เขียนโพสต์</span></button>
+<button data-view="pages"><span>โพสต์แบบเพจ</span></button>
+<button data-view="profiles"><span>โปรไฟล์ข้อความ</span></button>
 <button data-view="activity"><svg class="icon"><use href="#i-history"/></svg><span>ประวัติการทำงาน</span></button>
 </nav>
 <div class="sidebar-bottom"><div class="local-note"><span class="status-dot"></span><div>พื้นที่ส่วนตัวบนเครื่อง<small>เซสชันแยกสำหรับแต่ละบัญชี</small></div></div><button id="theme" class="theme-button" aria-pressed="false"><svg class="icon"><use href="#i-sun"/></svg><span>เปลี่ยนเป็นโหมดมืด</span></button><span class="version">DESKTOP · 1.3.1</span></div>
@@ -50,6 +52,15 @@
 <section id="view-activity" class="view" aria-labelledby="title-activity" hidden>
 <div class="page-heading"><div><div class="eyebrow">ACTIVITY</div><h1 id="title-activity">ประวัติการทำงาน<span class="heading-dot">.</span></h1><p>สถานะล่าสุดและผลการทำงานของบัญชีที่เลือกในรอบเปิดโปรแกรมนี้</p></div><button id="stop-active" class="secondary"><svg class="icon"><use href="#i-stop"/></svg>หยุดงานบัญชีนี้</button></div><div id="logs" class="panel glass activity-list"></div>
 </section>
+<section id="view-pages" class="view" hidden>
+<div class="page-heading"><div><h1>โพสต์แบบเพจ</h1><p>เชื่อมเพจที่คุณจัดการด้วย Meta API · ต้องเปิดโปรแกรมค้างไว้เพื่อทำงานตามเวลา</p></div></div>
+<div class="compose-layout"><article class="panel glass"><h2>เชื่อมเพจ</h2>
+<form id="page-connect"><label>Page ID<input name="page_id" required pattern="[0-9]+"></label><label>Page Access Token<input name="token" type="password" required autocomplete="off"></label><button class="primary">เชื่อมต่อเพจ</button></form>
+<p class="footnote">ต้องมีสิทธิ์เผยแพร่เพจของ Meta โทเคนอยู่ในหน่วยความจำเท่านั้น เมื่อปิดโปรแกรมต้องเชื่อมใหม่ เซสชันบัญชี Chrome ใช้แทนโทเคนนี้ไม่ได้</p>
+<h2>สร้างโพสต์เพจ</h2><form id="page-post"><label>เพจ<select id="page-select" required></select></label><label>ข้อความ<textarea name="message" required maxlength="10000" rows="5"></textarea></label><label>ลิงก์แนบ (ไม่บังคับ)<input name="link" type="url" placeholder="https://…"></label><label>เวลาตามเครื่องนี้ (เว้นว่างเพื่อส่งทันที)<input name="time" type="datetime-local"></label><button class="primary">เพิ่มงานโพสต์เพจ</button></form>
+</article><aside class="panel glass"><h2>สถานะโพสต์เพจ</h2><div id="page-jobs"></div><button id="page-refresh" class="secondary">รีเฟรช</button></aside></div></section>
+<section id="view-profiles" class="view" hidden><div class="page-heading"><div><h1>โปรไฟล์ข้อความ</h1><p>เก็บข้อความต่างกันสำหรับแต่ละกลุ่มของบัญชีที่เลือก · รูปแนบยังไม่รองรับในรุ่นนี้</p></div></div>
+<div class="compose-layout"><article class="panel glass"><form id="profile-create"><label>ชื่อโปรไฟล์<input name="name" required maxlength="80"></label><label>ข้อความ<textarea name="message" rows="6" required maxlength="10000"></textarea></label><button class="primary">บันทึกโปรไฟล์</button></form></article><aside class="panel glass"><h2>ผูกกับกลุ่มที่เลือก</h2><p>เลือกกลุ่มในเมนูกลุ่มก่อน แล้วเลือกโปรไฟล์ที่ต้องการ</p><select id="profile-select" aria-label="โปรไฟล์ข้อความ"></select><button id="profile-assign" class="primary">ใช้กับกลุ่มที่เลือก</button><div id="profile-list"></div></aside></div></section>
 <footer>FB AutoPost <span>·</span> จัดการบนเครื่องของคุณ</footer>
 </main></div>
 </body></html>

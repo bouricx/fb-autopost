@@ -1,6 +1,6 @@
 'use strict';
 const $ = (selector) => document.querySelector(selector);
-const titles = {accounts:'บัญชี Facebook', groups:'กลุ่มของฉัน', compose:'เขียนโพสต์', activity:'ประวัติการทำงาน'};
+const titles = {accounts:'บัญชี Facebook', groups:'กลุ่มของฉัน', compose:'เขียนโพสต์', activity:'ประวัติการทำงาน', pages:'โพสต์แบบเพจ', profiles:'โปรไฟล์ข้อความ'};
 let token = '', accounts = [], logs = [], activeId = '', currentView = 'accounts', selectedOnly = false;
 let polling = false, busy = false, accountSignature = '', logSignature = '', cacheRequest = 0;
 const cache = new Map(), choices = new Map();
