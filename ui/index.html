@@ -1,1 +1,55 @@
-<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FB AutoPost Browser</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/app.js" defer></script></head><body><main><header><div><span class="badge">FB AUTOPOST · BROWSER EDITION 1.2</span><h1>บัญชี Facebook<span>ล็อกอินบน Facebook โดยตรง ไม่ต้องวางโทเคน</span></h1></div><span id="connection">กำลังเชื่อมต่อ…</span></header><div id="notice" role="status"></div><section class="grid"><article><h2>1 · บัญชี Facebook</h2><form id="add"><label>ชื่อบัญชี<input name="name" required maxlength="80" placeholder="เช่น Veltshop"></label><button>เพิ่มบัญชี</button></form><div id="accounts"></div><details><summary>วิธีล็อกอิน</summary><p>กดล็อกอิน → Chrome เปิด facebook.com → เข้าสู่ระบบและยืนยันตัวตนเอง → กลับมากดตรวจล็อกอิน เซสชันถูกเก็บในโปรไฟล์แยกบัญชีบนคอมเครื่องนี้ โปรแกรมไม่รับรหัสผ่าน ไม่ต้องใช้ Meta App</p></details></article><article><h2>2 · เตรียมโพสต์</h2><form id="post"><label>บัญชี<select name="account_id" required></select></label><button id="load" type="button" class="secondary">โหลดกลุ่มที่ฉันเข้าร่วม</button><div id="groups"></div><label>ลิงก์กลุ่ม (หนึ่งลิงก์ต่อบรรทัด)<textarea name="urls" rows="3" placeholder="https://www.facebook.com/groups/…" required></textarea></label><label>ข้อความโพสต์<textarea name="message" rows="5" maxlength="10000" required></textarea></label><label>พักระหว่างกลุ่ม (วินาที)<input name="delay" type="number" min="30" max="3600" value="60" required></label><small>เตรียมร่าง: ตรวจและกดโพสต์เองใน Chrome · เริ่มรอบ: ส่งตามลิงก์ที่กำหนดหนึ่งรอบ ไม่วนซ้ำ</small><div class="actions"><button type="button" id="draft" class="secondary">เปิดและเตรียมร่าง</button><button>เริ่มรอบโพสต์</button></div></form></article></section><section class="queue"><h2>Log การทำงาน</h2><div id="logs"></div></section><details><summary>สิ่งที่รองรับและข้อจำกัด</summary><p>หลายบัญชี โปรไฟล์แยก เปิดล็อกอิน ตรวจเซสชัน โหลดลิงก์กลุ่มที่เห็นบนหน้าจอ เตรียมร่าง และส่งข้อความลงกลุ่มหนึ่งรอบ Facebook อาจเปลี่ยนหน้าจอ ขอ CAPTCHA หรือ 2FA ซึ่งคุณต้องดำเนินการเอง หากไม่ยืนยันผล โปรแกรมหยุดรอบเพื่อไม่ส่งซ้ำ</p><p>ยังไม่มีรูปแนบ ดันคอมเมนต์ กดไลค์ แชร์ หรือ Discord user-token ต้องติดตั้ง Google Chrome ก่อน เปิดโปรแกรมและคอมค้างไว้ขณะทำงาน ปุ่มหยุดจะหยุดงานถัดไป ไม่ย้อนกลับโพสต์ที่ส่งแล้ว</p></details></main></body></html>
+<!doctype html>
+<html lang="th" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FB AutoPost · Workspace</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/app.js" defer></script></head>
+<body>
+<svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v3"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="m14 5 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14z"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-5v6l4 2"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5M4 16a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7m0-7L10 14m-1-9H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/></symbol>
+</defs></svg>
+<div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+<div class="workspace">
+<aside class="sidebar glass">
+<a class="brand" href="#accounts"><span class="brand-mark"><svg class="icon"><use href="#i-grid"/></svg></span><span>AutoPost<small>YOUR SOCIAL WORKSPACE</small></span></a>
+<div class="nav-caption">พื้นที่ทำงาน</div>
+<nav aria-label="เมนูหลัก">
+<button data-view="accounts" aria-current="page"><svg class="icon"><use href="#i-users"/></svg><span>บัญชี Facebook</span><span id="account-count" class="nav-count">0</span></button>
+<button data-view="groups"><svg class="icon"><use href="#i-grid"/></svg><span>กลุ่มของฉัน</span><span id="group-count" class="nav-count">0</span></button>
+<button data-view="compose"><svg class="icon"><use href="#i-edit"/></svg><span>เขียนโพสต์</span></button>
+<button data-view="activity"><svg class="icon"><use href="#i-history"/></svg><span>ประวัติการทำงาน</span></button>
+</nav>
+<div class="sidebar-bottom"><div class="local-note"><span class="status-dot"></span><div>พื้นที่ส่วนตัวบนเครื่อง<small>เซสชันแยกสำหรับแต่ละบัญชี</small></div></div><button id="theme" class="theme-button" aria-pressed="false"><svg class="icon"><use href="#i-sun"/></svg><span>เปลี่ยนเป็นโหมดมืด</span></button><span class="version">BROWSER EDITION · 1.3</span></div>
+</aside>
+<main>
+<header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">บัญชี Facebook</strong></div><div class="topbar-right"><span id="connection" class="connection" role="status">กำลังเชื่อมต่อ</span><label class="account-switch"><span class="sr-only">บัญชีที่ใช้งาน</span><select id="active-account" aria-label="บัญชีที่ใช้งาน"><option value="">ยังไม่มีบัญชี</option></select></label></div></header>
+<div id="notice" class="notice" role="status" hidden></div>
+<section id="view-accounts" class="view" aria-labelledby="title-accounts">
+<div class="page-heading"><div><div class="eyebrow">CONNECTED ACCOUNTS</div><h1 id="title-accounts">บัญชี Facebook<span class="heading-dot">.</span></h1><p>ล็อกอินครั้งแรกบน Facebook แล้วกลับมาจัดการทุกบัญชีที่นี่</p></div><span class="soft-pill">โปรไฟล์แยกแต่ละบัญชี</span></div>
+<div class="account-layout"><div><div id="accounts" class="account-list"></div></div><aside class="panel glass add-panel"><span class="step-label">เริ่มต้นง่าย ๆ</span><h2>เพิ่มบัญชีของคุณ</h2><form id="add"><label>ชื่อที่ต้องการแสดง<input name="name" required maxlength="80" placeholder="เช่น Veltshop"></label><button class="primary wide" type="submit"><svg class="icon"><use href="#i-plus"/></svg>เพิ่มบัญชี</button></form><ol class="steps"><li><span>1</span>กดล็อกอินเพื่อเปิด Chrome</li><li><span>2</span>เข้าสู่ระบบที่ facebook.com</li><li><span>3</span>กลับมากดตรวจล็อกอิน</li></ol><p class="footnote">ใช้ Google Chrome ที่ติดตั้งบนเครื่อง และยืนยันตัวตนบน Facebook ด้วยตัวคุณเอง</p></aside></div>
+</section>
+<section id="view-groups" class="view" aria-labelledby="title-groups" hidden>
+<div class="page-heading"><div><div class="eyebrow">YOUR COMMUNITIES</div><h1 id="title-groups">กลุ่มของฉัน<span class="heading-dot">.</span></h1><p>เลือกกลุ่มที่ต้องการโพสต์ จากบัญชี Facebook ที่คุณใช้งาน</p></div><button id="load-groups" class="primary"><svg class="icon"><use href="#i-refresh"/></svg><span>ดึงข้อมูลจาก Facebook</span></button></div>
+<div class="library-bar glass"><label class="search-field"><svg class="icon"><use href="#i-search"/></svg><input id="search" type="search" placeholder="ค้นหาชื่อกลุ่ม…" aria-label="ค้นหาชื่อกลุ่ม"></label><div class="segmented" aria-label="ตัวกรองกลุ่ม"><button id="filter-all" aria-pressed="true">ทั้งหมด <span id="total-groups">0</span></button><button id="filter-selected" aria-pressed="false">เลือกแล้ว <span id="selected-groups">0</span></button></div></div>
+<div class="library-meta"><span id="group-meta">ยังไม่มีข้อมูลกลุ่ม</span><button id="clear-selection" class="text-button">ล้างการเลือก</button></div>
+<div id="groups" class="group-grid" aria-live="polite"></div>
+<div id="selection-tray" class="selection-tray glass" hidden><div><span class="selection-icon"><svg class="icon"><use href="#i-check"/></svg></span><strong id="tray-count">เลือกแล้ว 0 กลุ่ม</strong><span class="muted">พร้อมสำหรับโพสต์ถัดไป</span></div><button id="write-selected" class="primary">เขียนโพสต์<svg class="icon"><use href="#i-arrow"/></svg></button></div>
+</section>
+<section id="view-compose" class="view" aria-labelledby="title-compose" hidden>
+<div class="page-heading"><div><div class="eyebrow">CREATE & SHARE</div><h1 id="title-compose">เขียนโพสต์<span class="heading-dot">.</span></h1><p>เตรียมข้อความ ตรวจกลุ่มปลายทาง แล้วเริ่มเมื่อคุณพร้อม</p></div></div>
+<div class="compose-layout"><article class="panel glass"><form id="post"><div class="section-heading"><h2>ข้อความของคุณ</h2><span id="character-count" class="muted">0 / 10,000</span></div><label class="sr-only" for="message">ข้อความโพสต์</label><textarea id="message" name="message" rows="9" maxlength="10000" placeholder="วันนี้อยากแบ่งปันอะไรกับกลุ่มของคุณ…" required></textarea><div class="compose-settings"><label>พักระหว่างกลุ่ม<div class="number-field"><input name="delay" type="number" min="30" max="3600" value="60" required><span>วินาที</span></div></label><div class="mode-note"><span class="status-dot"></span>ส่งหนึ่งรอบ · ไม่วนซ้ำ</div></div><details class="manual-links"><summary>เพิ่มลิงก์กลุ่มด้วยตัวเอง</summary><label>หนึ่งลิงก์ต่อบรรทัด<textarea name="urls" rows="3" placeholder="https://www.facebook.com/groups/…"></textarea></label><p class="footnote">ลิงก์ที่เพิ่มเองจะแสดงเป็นลิงก์ จนกว่าจะดึงชื่อและรูปจาก Facebook ได้</p></details><div class="actions"><button type="button" id="draft" class="secondary">เปิดและเตรียมร่าง</button><button type="submit" class="primary" id="start-post">เริ่มรอบโพสต์<svg class="icon"><use href="#i-arrow"/></svg></button></div><p class="footnote">เตรียมร่างจะเปิดกลุ่มแรกให้ตรวจและกดโพสต์เอง ส่วนเริ่มรอบจะส่งตามกลุ่มที่ยืนยัน</p></form></article><aside class="panel glass target-panel"><span class="step-label">ปลายทางของโพสต์</span><h2 id="target-account">ยังไม่ได้เลือกบัญชี</h2><div id="targets"></div><button id="choose-groups" class="secondary wide"><svg class="icon"><use href="#i-grid"/></svg>เลือกกลุ่ม</button><p class="footnote">สูงสุด 20 กลุ่มต่อรอบ เปิดโปรแกรมและคอมค้างไว้จนงานเสร็จ</p></aside></div>
+</section>
+<section id="view-activity" class="view" aria-labelledby="title-activity" hidden>
+<div class="page-heading"><div><div class="eyebrow">ACTIVITY</div><h1 id="title-activity">ประวัติการทำงาน<span class="heading-dot">.</span></h1><p>สถานะล่าสุดและผลการทำงานของบัญชีที่เลือกในรอบเปิดโปรแกรมนี้</p></div><button id="stop-active" class="secondary"><svg class="icon"><use href="#i-stop"/></svg>หยุดงานบัญชีนี้</button></div><div id="logs" class="panel glass activity-list"></div>
+</section>
+<footer>FB AutoPost <span>·</span> จัดการบนเครื่องของคุณ</footer>
+</main></div>
+</body></html>

@@ -13,6 +13,7 @@ from . import manager
 from .queue_importer import parse
 
 from .browser_manager import BrowserManager
+from .group_metadata import normalize_group
 from . import config as legacy_config, storage as legacy_storage
 browsers = BrowserManager()
 
@@ -44,7 +45,7 @@ async def local_only(request: Request, call_next):
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' https://*.fbcdn.net https://*.fbsbx.com; frame-ancestors 'none'; base-uri 'none'"
     return response
 
 class Account(BaseModel):
@@ -159,7 +160,9 @@ async def browser_add(body: BrowserAccount):
 def saved_groups(aid: str):
     try:browsers.account(aid)
     except ValueError as exc:raise HTTPException(400,str(exc))
-    return legacy_storage.read_joined_groups(aid)
+    data=legacy_storage.read_joined_groups(aid)
+    data['groups']=[row for raw in data['groups'] if (row:=normalize_group(raw))]
+    return data
 
 @app.post('/api/browser/accounts/{aid}/{action}')
 async def browser_action(aid: str,action: str):

@@ -18,9 +18,26 @@ def base_dir() -> Path:
 
 
 BASE_DIR = base_dir()
-CONFIG_PATH = BASE_DIR / "config.json"
-DATA_DIR = BASE_DIR / "data"
-PROFILE_ROOT = BASE_DIR / "fb_profile"
+# Keep browser accounts/profiles across EXE versions without copying a live
+# Chrome profile. Existing 1.2 data stays in place; new installs use stable storage.
+def state_dir() -> Path:
+    override = os.environ.get("FBAUTO_USER_DIR")
+    if override:
+        return Path(override)
+    local = os.environ.get("LOCALAPPDATA") if os.name == "nt" else None
+    if local:
+        home = Path(local) / "FB-AutoPost"
+        stable = home / "user-data"
+        previous = home / "v1.2.0" / "FB-AutoPost" / "app"
+        if not (stable / "config.json").exists() and (previous / "config.json").exists():
+            return previous
+        return stable
+    return BASE_DIR
+
+STATE_DIR = state_dir()
+CONFIG_PATH = STATE_DIR / "config.json"
+DATA_DIR = STATE_DIR / "data"
+PROFILE_ROOT = STATE_DIR / "fb_profile"
 IMAGES_DIR = BASE_DIR / "images"
 IMAGES_DISCORD_DIR = BASE_DIR / "images_discord"
 

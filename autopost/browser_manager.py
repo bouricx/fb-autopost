@@ -5,6 +5,7 @@ from datetime import datetime,timezone
 from urllib.parse import urlparse
 from . import config as C, fb_accounts as A, storage as S
 from .browser import launch_context,close_context
+from .group_metadata import EXTRACT_GROUPS, normalize_group
 
 class BrowserManager:
     def __init__(self):
@@ -78,18 +79,24 @@ class BrowserManager:
         page=await self.session(aid)
         await page.goto('https://www.facebook.com/groups/joins/',wait_until='domcontentloaded',timeout=60000)
         if not await self.check(aid):raise ValueError('ล็อกอิน Facebook ก่อน')
+        await page.locator('a[href*="/groups/"]').first.wait_for(state='visible',timeout=20000)
         found={}
-        for _ in range(5):
-            rows=await page.locator('a[href]').evaluate_all("els=>els.map(e=>({url:e.href,name:e.innerText})).filter(e=>e.name)")
-            for row in rows:
-                match=re.fullmatch(r'https://www\.facebook\.com/groups/([A-Za-z0-9_.-]+)/?(?:\?.*)?',row['url'])
-                if match and match[1] not in ('joins','feed','discover','create'):
-                    url='https://www.facebook.com/groups/'+match[1]+'/'
-                    found[url]={'url':url,'name':row['name'][:150]}
-            await page.mouse.wheel(0,700);await asyncio.sleep(1)
+        for _ in range(8):
+            rows=await page.locator('a[href]').evaluate_all(EXTRACT_GROUPS)
+            for raw in rows:
+                row=normalize_group(raw)
+                if row:
+                    existing=found.get(row['url'])
+                    if existing and not row['image_url']:
+                        row['image_url']=existing['image_url']
+                    found[row['url']]=row
+            if len(found)>=100:break
+            await page.mouse.wheel(0,750);await asyncio.sleep(1)
         result=list(found.values())[:100]
-        S.save_joined_groups(aid,result)
-        self.log(aid,f'โหลดลิงก์กลุ่มที่เห็นบนหน้าได้ {len(result)} กลุ่ม (อาจไม่ครบ)')
+        if not result:
+            raise ValueError('ยังไม่พบกลุ่มบนหน้า Facebook ตรวจการล็อกอินแล้วลองใหม่ ข้อมูลกลุ่มเดิมยังอยู่')
+        S.save_joined_groups(aid,result,datetime.now(timezone.utc).isoformat())
+        self.log(aid,f'อัปเดตชื่อและรูปกลุ่ม {len(result)} กลุ่มจากหน้าที่เปิด (อาจไม่ครบทุกกลุ่ม)')
         return result
 
     @staticmethod
