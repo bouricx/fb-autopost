@@ -16,6 +16,11 @@ class BrowserManager:
         self.logs=[]
         self.account_lock=asyncio.Lock()
         self.status={}
+        self.steps={}
+
+    def step(self,aid,text):
+        self.steps[aid]=text
+        self.log(aid,text)
 
     def log(self,account,text):
         self.logs.append({'time':datetime.now(timezone.utc).isoformat(),'account':account,'message':text})
@@ -116,11 +121,17 @@ class BrowserManager:
         if self.tasks.get(aid) and not self.tasks[aid].done() and asyncio.current_task()!=self.tasks[aid]:
             raise ValueError('บัญชีนี้กำลังทำงาน')
         page=await self.session(aid)
+        self.step(aid,'กำลังเปิดหน้ากลุ่ม')
         await page.goto(self.group_url(url),wait_until='domcontentloaded',timeout=60000)
         if not await self.check(aid):raise ValueError('กรุณาล็อกอินหรือยืนยันตัวตนใน Facebook')
-        trigger=page.get_by_text(re.compile(r'^(Write something|เขียนอะไรบางอย่าง|คุณกำลังคิดอะไร)',re.I)).first
-        await trigger.click(timeout=15000)
-        dialog=page.get_by_role('dialog').last
+        self.step(aid,'กำลังค้นหาช่องสร้างโพสต์ในกลุ่ม')
+        labels=re.compile(r'^(Write something|Write a post|Create post|เขียนอะไรบางอย่าง|เขียนบางอย่าง|สร้างโพสต์|คุณกำลังคิดอะไร)',re.I)
+        trigger=page.get_by_role('button',name=labels).or_(page.get_by_text(labels)).filter(visible=True).first
+        await trigger.click(timeout=30000)
+        self.step(aid,'กำลังรอหน้าต่างเขียนโพสต์')
+        dialog=page.get_by_role('dialog').filter(visible=True).last
+        await dialog.wait_for(state='visible',timeout=30000)
+        self.step(aid,'กำลังใส่ข้อความโพสต์')
         editor=dialog.locator('[contenteditable="true"][role="textbox"]').first
         await editor.fill(message,timeout=15000)
         await page.bring_to_front()
@@ -149,15 +160,19 @@ class BrowserManager:
                 try:
                     page,dialog=await self.prepare(aid,url,messages[url.rstrip('/') + '/'])
                     if stop.is_set():break
+                    self.step(aid,'กำลังตรวจปุ่มโพสต์')
                     button=dialog.get_by_role('button',name=re.compile(r'^(Post|โพสต์)$')).last
                     if not await button.is_enabled():raise ValueError('ปุ่มโพสต์ยังใช้งานไม่ได้')
                     # Once clicked, never retry automatically: a post may have been accepted.
+                    self.step(aid,'กำลังกดส่งโพสต์ — หลังขั้นตอนนี้ห้ามส่งซ้ำก่อนตรวจ Facebook')
                     await button.click(timeout=15000)
+                    self.step(aid,'กดส่งแล้ว กำลังรอหน้าต่างเขียนโพสต์ปิด')
                     await dialog.wait_for(state='hidden',timeout=20000)
                     self.log(aid,'ส่งผ่านปุ่มโพสต์แล้ว: '+url+' (อาจรอผู้ดูแลอนุมัติ)')
                     S.append_post_link(aid,'ส่งจากกลุ่ม',url)
                 except Exception as exc:
-                    self.log(aid,'หยุดรอบ: ไม่ยืนยันผลได้ ('+type(exc).__name__+') ให้ตรวจ Facebook ก่อนเริ่มใหม่ — '+url)
+                    step=self.steps.get(aid,'เตรียมโพสต์')
+                    self.log(aid,'หยุดรอบ: '+step+' ('+type(exc).__name__+') ให้ตรวจ Facebook ก่อนเริ่มใหม่ — '+url)
                     break
                 if i<len(urls)-1:
                     try:await asyncio.wait_for(stop.wait(),timeout=delay)
