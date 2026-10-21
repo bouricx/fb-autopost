@@ -1,5 +1,9 @@
 # FB AutoPost 1.3.1 — Desktop
 
+## AutoPost Manager TH — Electron edition 0.5.0
+
+เพิ่มซอร์สเวอร์ชัน Electron/TypeScript/React โดย Veltshop ไว้ที่ [`electron-manager-th/`](electron-manager-th/GITHUB_README.md) แยกจากโปรเจกต์ Python เดิม ไม่รวม Cookie, ฐานข้อมูล, Profile และตัวติดตั้งส่วนตัว อ่านวิธีรันและข้อจำกัดในลิงก์นี้ก่อนใช้งาน
+
 [ดาวน์โหลด FB-AutoPost-Setup.exe](https://github.com/bouricx/fb-autopost/raw/refs/heads/main/downloads/FB-AutoPost-Setup.exe)
 
 ## ใหม่ในรุ่น 1.3.1
