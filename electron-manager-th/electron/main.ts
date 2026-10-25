@@ -41,7 +41,11 @@ progressBus.subscribe(event => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("automation:progress", event);
 });
 const sessionTestMode = process.env.AUTOPOST_SESSION_TEST === "1";
-if (sessionTestMode) app.setPath("userData", join(app.getPath("appData"), "autopost-manager-th-session-test"));
+if (sessionTestMode) {
+  const testData = join(app.getPath("appData"), "autopost-manager-th-session-test");
+  mkdirSync(testData, { recursive: true });
+  app.setPath("userData", testData);
+}
 const ownsAppInstance = app.requestSingleInstanceLock();
 if (!ownsAppInstance) app.quit();
 app.on("second-instance", () => {

@@ -16,3 +16,10 @@ it("keeps the app alive after cleanup failure and permits another exit attempt",
   await handle({ preventDefault() {} }); expect(error).toHaveBeenCalledOnce(); expect(quit).not.toHaveBeenCalled();
   await handle({ preventDefault() {} }); expect(quit).toHaveBeenCalledOnce();
 });
+it('defers the second quit until the cancelled native event has unwound',async()=>{
+ let nativeQuitting=true;
+ const quit=vi.fn(()=>{expect(nativeQuitting).toBe(false);});
+ const handle=createQuitHandler(async()=>undefined,quit,()=>{});
+ const pending=handle({preventDefault(){setImmediate(()=>{nativeQuitting=false;});}});
+ await pending;expect(quit).toHaveBeenCalledOnce();
+});
