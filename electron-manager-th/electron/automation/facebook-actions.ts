@@ -7,6 +7,8 @@ import { AuthenticationError } from "../core/errors";
 import { ActionBlockedError, UncertainResultError, type ActionPayload, type ActionKind } from "./contracts";
 import { resolvePostTarget } from "./post-target";
 import { findCommentComposer, verifiedComment } from "./comment-composer";
+import { isPendingApprovalDetected } from "./pending-approval";
+import { FEATURES, assertActionEnabled, type FeatureFlags } from "../../src/shared/features";
 
 async function visible(locator: Locator): Promise<Locator | null> {
   for (let index = 0; index < Math.min(await locator.count(), 30); index++) {
@@ -29,8 +31,9 @@ export async function assertFacebookReady(page: Page) {
 }
 
 export class FacebookActions {
-  constructor(private adapter: FacebookBrowserAdapter, private screenshots: string) {}
+  constructor(private adapter: FacebookBrowserAdapter, private screenshots: string, private readonly features: FeatureFlags = FEATURES) {}
   async execute(kind: Exclude<ActionKind, "post">, account: Account, payload: ActionPayload, report: (message: string, percent: number) => void, onSubmitting?: () => void) {
+    if (!this.features[kind]) assertActionEnabled(kind);
     return this.adapter.withActionPage({ ...account, headless: payload.headless === null ? account.headless : Number(payload.headless) }, async page => {
       let submitted = false;
       try {
@@ -42,12 +45,12 @@ export class FacebookActions {
         report("เปิดโพสต์แล้ว กำลังตรวจสอบสิทธิ์", 20);
         if (kind === "like") {
           const unlike = await visible(post.getByRole("button", { name: /^(Unlike|เลิกถูกใจ)$/i }));
-          if (unlike) return { url: page.url(), message: "ถูกใจอยู่แล้ว ไม่กดซ้ำ" };
+          if (unlike) return { status: "published" as const, url: page.url(), message: "ถูกใจอยู่แล้ว ไม่กดซ้ำ" };
           const button = await visible(post.getByRole("button", { name: /^(Like|ถูกใจ)$/i }));
           if (!button) throw new ActionBlockedError("ไม่พบปุ่มถูกใจที่ใช้งานได้");
           await assertFacebookReady(page); submitted = true; onSubmitting?.(); await button.click();
           await post.getByRole("button", { name: /^(Unlike|เลิกถูกใจ)$/i }).first().waitFor({ state: "visible", timeout: 15000 });
-          return { url: page.url(), message: "ถูกใจสำเร็จ" };
+          return { status: "published" as const, url: page.url(), message: "ถูกใจสำเร็จ" };
         }
         if (kind === "comment") {
           if (!payload.caption.trim() && !payload.media.length) throw new ActionBlockedError("กรุณาระบุข้อความหรือรูปสำหรับความคิดเห็น");
@@ -84,7 +87,7 @@ export class FacebookActions {
                 permalink: link?.href || null };
             }), { marker, userId, name: account.name.replace(/\s+/g, " ").trim() });
             const confirmed = evidence.filter(item => verifiedComment(item, payload.caption, payload.media.length > 0));
-            if (confirmed.length === 1) return { url: confirmed[0].permalink || page.url(), message: "ตรวจพบความคิดเห็นใหม่ตรงข้อความ/รูปและบัญชีในโพสต์เป้าหมายแล้ว" };
+            if (confirmed.length === 1) return { status: "published" as const, url: confirmed[0].permalink || page.url(), message: "ตรวจพบความคิดเห็นใหม่ตรงข้อความ/รูปและบัญชีในโพสต์เป้าหมายแล้ว" };
             await page.waitForTimeout(500);
           }
           throw new UncertainResultError("ส่งความคิดเห็นแล้วแต่ยังยืนยันความคิดเห็นใหม่พร้อมผู้เขียนและสื่อไม่ได้ หยุดเพื่อป้องกันส่งซ้ำ กรุณาตรวจโพสต์");
@@ -118,7 +121,8 @@ export class FacebookActions {
         submitted = true; onSubmitting?.(); await submit.click();
         await composer.waitFor({ state: "hidden", timeout: 30000 });
         await assertFacebookReady(page);
-        return { url: payload.targetUrl, message: "Facebook รับคำสั่งแชร์แล้ว (อาจรออนุมัติจากกลุ่ม)" };
+        if (this.features.pendingApprovalDetector && await isPendingApprovalDetected(page)) return { status: "pending_approval" as const, url: payload.targetUrl, message: "ส่งแชร์แล้ว แต่รอการอนุมัติจากกลุ่ม" };
+        return { status: "published" as const, url: payload.targetUrl, message: "Facebook รับคำสั่งแชร์และไม่พบข้อความรออนุมัติ" };
       } catch (error) {
         await mkdir(this.screenshots, { recursive: true });
         const screenshot = join(this.screenshots, `action-${crypto.randomUUID()}.png`);

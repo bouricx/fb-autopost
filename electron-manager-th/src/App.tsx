@@ -14,12 +14,15 @@ import {
   Send, Settings, Trash2, Users, Wifi, WifiOff, X,
 } from "lucide-react";
 import type { Account, AdapterType, Dashboard, Destination, DestinationKind, FacebookGroupInfo, Job, LogEntry } from "./shared/types";
+import { FEATURES } from "./shared/features";
+import "./styles/accounts.css";
+import "./styles/group-picker.css";
 
 type Page = "dashboard" | "accounts" | "compose" | "queue" | "logs" | "settings";
 const pageTitle: Record<Page, [string, string]> = {
   dashboard: ["ภาพรวม", "สถานะงานและสถิติการโพสต์ล่าสุด"],
   accounts: ["บัญชีและปลายทาง", "จัดการ Facebook, Discord และตำแหน่งที่จะโพสต์"],
-  compose: ["สร้างและตั้งเวลา", "โพสต์ → ความคิดเห็น → แชร์ → ถูกใจ เลือกเปิดขั้นตอนที่ต้องการในงานเดียว"],
+  compose: ["สร้างและตั้งเวลา", "สร้างโพสต์และจัดคิวอย่างปลอดภัย พร้อมตรวจสอบ permalink"],
   queue: ["คิวและประวัติ", "ติดตามงานที่รอ กำลังทำ สำเร็จ และล้มเหลว"],
   logs: ["บันทึกการทำงาน", "เหตุการณ์จากระบบคิวและตัวเชื่อมต่อแพลตฟอร์ม"],
   settings: ["ตั้งค่า", "การทำงานเบื้องหลังและข้อควรทราบ"],
@@ -49,6 +52,7 @@ export function App() {
   const [liveEvents, setLiveEvents] = useState<import("../electron/core/progress-bus").ProgressEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [lastFailure, setLastFailure] = useState<string | null>(null);
   const mutationLock = useRef(false);
   const refreshSequence = useRef(0);
 
@@ -69,6 +73,7 @@ export function App() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = window.autopost.onProgress(event => {
       setLiveEvents(current => [event, ...current].slice(0, 50));
+      if (event.type === "target.failed") setLastFailure(event.message);
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => { void refresh(); }, 120);
     });
@@ -100,6 +105,7 @@ export function App() {
     <main className={page === "compose" ? "compose-page" : ""}>
       <header><div><h1>{pageTitle[page][0]}</h1><p>{pageTitle[page][1]}</p></div><button className="icon-button" onClick={() => void refresh()} title="รีเฟรช"><RefreshCw/></button></header>
       {error && <div className="error-banner"><span>{error}</span><button onClick={() => setError("")}><X/></button></div>}
+      {lastFailure && <div className="error-banner" role="alert"><span>โพสต์/งานไม่สำเร็จ: {lastFailure} — ตรวจคิวและ Log ก่อนส่งซ้ำ</span><button onClick={() => setLastFailure(null)} aria-label="ปิดแจ้งเตือน"><X/></button></div>}
       {(busy || notice) && <div className="sync-notice" role="status">{busy ? "กำลังดำเนินการ กรุณารอสักครู่…" : notice}</div>}
       <section className="content">
         <fieldset className="workspace-fieldset" disabled={busy}>
@@ -107,7 +113,7 @@ export function App() {
         {(page === "queue" || page === "dashboard") && <ScheduleStatus/>}
         <div className="workflow-overview"><div className="usage-steps">{([
           ["accounts", "1", "เตรียมบัญชี", `${accounts.length} บัญชี · ${destinations.length} ปลายทาง`],
-          ["compose", "2", "สร้างและตั้งเวลา", "ข้อความ · สื่อ · ขั้นตอนหลังโพสต์"],
+          ["compose", "2", "สร้างและตั้งเวลา", "ข้อความ · สื่อ · โพสต์หลัก"],
           ["queue", "3", "ตรวจคิวและผลลัพธ์", `รอ ${dashboard?.pending || 0} · กำลังทำ ${dashboard?.running || 0}`],
         ] as const).map(([target, number, title, detail]) => <button key={target} className={page === target ? "active" : ""} onClick={() => setPage(target)}><i>{number}</i><span><b>{title}</b><small>{detail}</small></span></button>)}</div>
         <div className="worker-control"><span className={worker ? "worker-running" : "worker-stopped"}>{worker ? "● ระบบคิวเปิดอยู่" : "● ระบบคิวหยุดอยู่"}</span><small>{worker ? "งานจะเริ่มเมื่อถึงเวลาที่ตั้ง" : "เพิ่มงานได้ แต่จะยังไม่เริ่มทำงาน"}</small><button className={worker ? "secondary small" : "primary small"} onClick={() => void mutate(() => worker ? window.autopost.stopWorker() : window.autopost.startWorker())}>{worker ? "หยุดรับงาน / รองานปัจจุบันจบ" : "เปิดระบบคิว"}</button></div></div>
@@ -150,40 +156,72 @@ function AccountsView({ accounts, destinations, mutate }: { accounts: Account[];
   const [showAccount, setShowAccount] = useState(false);
   const [showDestination, setShowDestination] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
-  const [showCookies, setShowCookies] = useState(false);
+  const [showFacebookLogin, setShowFacebookLogin] = useState(false);
   const [backup, setBackup] = useState<"export" | "import" | null>(null);
   const [selected, setSelected] = useState(accounts[0]?.id || "");
+  const [editingName, setEditingName] = useState(false);
+  const [accountName, setAccountName] = useState("");
   useEffect(() => { if (!accounts.some(a => a.id === selected)) setSelected(accounts[0]?.id || ""); }, [accounts, selected]);
-  return <div className="two-column">
-    <div className="panel fields"><h2>การเข้าสู่ระบบและ Session</h2><p className="form-hint">เลือกบัญชีในรายการเพื่อจัดการ Session ของบัญชีนั้น</p><button className="primary" onClick={() => setShowCookies(true)}>นำเข้า Cookie / เพิ่มบัญชี Facebook</button><button className="secondary" onClick={() => setBackup("import")}>กู้คืน Session จากไฟล์สำรอง</button>
-      {accounts.filter(a => a.id === selected && a.platform === "facebook").map(account => <div className="fields" key={account.id}>
-        <p><b>{account.name}</b><br/>สถานะ Session: {({ online: "ออนไลน์", expired: "หมดอายุ", restricted: "ถูกจำกัด", checkpoint: "ต้องยืนยันตัวตน", disabled: "ถูกปิดใช้งาน", unknown: "ยังไม่ทราบ" } as Record<string, string>)[account.sessionStatus || "unknown"]}<br/>{account.statusMessage}</p>
-        <small>หยุดคิวก่อนตรวจสอบหรือลบ Session</small>
-        <button className="secondary" onClick={() => void mutate(() => window.autopost.checkSession(account.id))}>ตรวจสอบ Session</button>
-        <button className="secondary" onClick={() => void mutate(() => window.autopost.copyCookie(account.id))}>คัดลอก Cookie (ล้างใน 45 วินาที)</button>
-        <button className="secondary" onClick={() => setBackup("export")}>สำรอง Session สำหรับย้ายเครื่อง</button>
-        <label><input type="checkbox" checked={!!account.headless} onChange={e => void mutate(() => window.autopost.setHeadless(account.id, e.target.checked))}/> ตรวจ Session แบบไม่แสดงหน้าต่าง</label>
-        <button className="danger" onClick={() => void mutate(() => window.autopost.deleteSession(account.id))}>ลบ Session และข้อมูลบัญชี</button>
+  return <div className="two-column accounts-layout">
+    <div className="panel account-session-panel"><div className="panel-title"><div><h2>Session และข้อมูลบัญชี</h2><p>เลือกบัญชีทางขวาเพื่อตรวจสอบ</p></div></div>
+      {accounts.filter(a => a.id === selected && a.platform === "facebook").map(account => <div className="account-session-details" key={account.id}>
+         <div className="session-summary"><b>{account.name}</b><span>ชื่อ Facebook: {account.facebookName || "ยังยืนยันไม่ได้"}</span><span>ประเภท: {account.facebookActorType === "profile" ? "บัญชีส่วนตัว" : account.facebookActorType === "page" ? "เพจ" : "ยังไม่ยืนยัน"}</span><span>สถานะ: {({ online: "ออนไลน์", expired: "หมดอายุ", restricted: "ถูกจำกัด", checkpoint: "ต้องยืนยันตัวตน", disabled: "ถูกปิดใช้งาน", unknown: "ยังไม่ทราบ" } as Record<string, string>)[account.sessionStatus || "unknown"]} · ตรวจล่าสุด {account.lastCheckedAt ? formatThaiTime(account.lastCheckedAt) : "ยังไม่เคยตรวจ"} · {account.status === "paused" ? "บัญชีถูกพักการโพสต์" : account.statusMessage}</span>{account.status === "paused" && <span className="session-paused-warning">บัญชีถูกพักการโพสต์ กรุณาตรวจเครือข่ายและ Session ก่อนตัดสินใจเริ่มงานใหม่</span>}</div>
+        {!editingName ? <button className="secondary small session-rename" onClick={() => { setAccountName(account.name); setEditingName(true); }}>เปลี่ยนชื่อที่แสดงในโปรแกรม</button> : <form className="session-rename-form" onSubmit={e => { e.preventDefault(); void mutate(() => window.autopost.renameAccount(account.id, accountName)).then(ok => { if (ok) setEditingName(false); }); }}><label>ชื่อบัญชี<input value={accountName} maxLength={80} required onChange={e => setAccountName(e.target.value)}/></label><button className="primary small" disabled={!accountName.trim()}>บันทึก</button><button type="button" className="secondary small" onClick={() => setEditingName(false)}>ยกเลิก</button></form>}
+        <div className="session-action-grid"><button className="primary" onClick={() => void mutate(() => window.autopost.checkSession(account.id))}>ตรวจสอบสถานะ</button><button className="secondary" onClick={() => void mutate(() => window.autopost.loginAndCheckFacebook(account.id))}>เข้าสู่ระบบด้วย Chrome</button></div>
+        <details className="session-more"><summary>จัดการ Session และข้อมูลสำรอง</summary><div className="session-action-grid"><button className="secondary" onClick={() => void mutate(() => window.autopost.copyCookie(account.id))}>คัดลอก Cookie (ล้างใน 45 วินาที)</button><button className="secondary" onClick={() => setBackup("export")}>สำรอง Session</button><button className="secondary" onClick={() => setBackup("import")}>กู้คืน Session</button><label><input type="checkbox" checked={!!account.headless} onChange={e => void mutate(() => window.autopost.setHeadless(account.id, e.target.checked))}/> ตรวจแบบไม่แสดงหน้าต่าง</label></div><small>หยุดคิวก่อนตรวจสอบหรือลบ Session</small><button className="danger" onClick={() => void mutate(() => window.autopost.deleteSession(account.id))}>ลบ Session และข้อมูลบัญชี</button></details>
       </div>)}
+      {!accounts.some(a => a.id === selected && a.platform === "facebook") && <p className="form-hint">เลือกบัญชี Facebook เพื่อดูสถานะ Session</p>}
     </div>
-    {showCookies && <CookieImportModal close={() => { setShowCookies(false); void mutate(async () => undefined); }}/ >}
+    {showFacebookLogin && <FacebookLoginModal accounts={accounts} select={setSelected} close={() => { setShowFacebookLogin(false); void mutate(async () => undefined); }}/ >}
     {backup && <SessionBackupModal mode={backup} accountId={selected} close={() => { setBackup(null); void mutate(async () => undefined); }}/ >}
     <div className="panel"><div className="panel-title"><div><h2>บัญชี</h2><p>{accounts.length} บัญชี</p></div><button className="primary small" onClick={() => setShowAccount(true)}><Plus/>เพิ่มบัญชี</button></div>
-      <div className="account-list">{accounts.map(account => <button key={account.id} className={`account-row ${selected === account.id ? "selected" : ""}`} onClick={() => setSelected(account.id)}>
-        <div className={`platform ${account.platform}`}>{account.platform === "facebook" ? "f" : "#"}</div><div><b>{account.name}</b><span>{account.adapterType}</span></div><em className={account.status}>{account.status}</em>
+      <div className="account-list">{accounts.map(account => <button key={account.id} className={`account-row ${selected === account.id ? "selected" : ""}`} onClick={() => { setSelected(account.id); setEditingName(false); }}>
+        <div className={`platform ${account.platform}`}>{account.platform === "facebook" && account.facebookPhotoUrl ? <img src={account.facebookPhotoUrl} alt="" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }}/> : account.platform === "facebook" ? "f" : "#"}</div><div><b>{account.name}</b><span>{account.platform === "facebook" ? `${account.facebookName ? `Facebook: ${account.facebookName} · ` : ""}${account.facebookActorType === "profile" ? "บัญชีส่วนตัว" : account.facebookActorType === "page" ? "เพจ" : "ประเภทไม่ทราบ"} · ${account.sessionStatus === "online" ? "ออนไลน์" : "ยังไม่ออนไลน์"}` : account.adapterType}</span></div><em className={account.status}>{account.status}</em>
       </button>)}</div>
     </div>
     <div className="panel"><div className="panel-title"><div><h2>ปลายทาง</h2><p>กลุ่ม เพจ โปรไฟล์ หรือห้อง Discord</p></div><button className="secondary small" disabled={!selected} onClick={() => setShowDestination(true)}><Plus/>เพิ่มปลายทาง</button></div>
       <div className="destination-list">{destinations.filter(d => d.accountId === selected).map(dest => <div className="destination-row" key={dest.id}><div><b>{dest.name}</b><span>{dest.kind} · {dest.url || dest.remoteId}</span></div><button className="danger-icon" onClick={() => void mutate(() => window.autopost.deleteDestination(dest.id))}><Trash2/></button></div>)}</div>
-      {accounts.find(a => a.id === selected)?.platform === "facebook" && <div className="facebook-tools"><button className="secondary" onClick={() => void mutate(() => window.autopost.loginFacebook(selected))}>เปิด Chrome เพื่อล็อกอิน</button><button className="primary" onClick={() => setShowGroups(true)}>ดึงกลุ่มของฉัน</button></div>}
+      {accounts.find(a => a.id === selected)?.platform === "facebook" && <div className="facebook-tools"><button className="primary" onClick={() => setShowGroups(true)}>ดึงกลุ่มของฉัน</button></div>}
     </div>
-    {showAccount && <AccountModal close={() => setShowAccount(false)} save={(input) => mutate(() => window.autopost.createAccount(input)).then(ok => { if (ok) setShowAccount(false); })}/>}
+    {showAccount && <AccountModal close={() => setShowAccount(false)} openFacebook={() => { setShowAccount(false); setShowFacebookLogin(true); }} save={(input) => mutate(() => window.autopost.createAccount(input)).then(ok => { if (ok) setShowAccount(false); })}/>}
     {showDestination && accounts.some(a => a.id === selected) && <DestinationModal account={accounts.find(a => a.id === selected)!} close={() => setShowDestination(false)} save={(input) => mutate(() => window.autopost.createDestination(input)).then(ok => { if (ok) setShowDestination(false); })}/>}
     {showGroups && accounts.some(a => a.id === selected) && <GroupsModal account={accounts.find(a => a.id === selected)!} close={() => setShowGroups(false)} save={(groups) => mutate(async () => { for (const group of groups) await window.autopost.createDestination({ accountId: selected, kind: "facebook_group", name: group.name, url: group.url }); }).then(ok => { if (ok) setShowGroups(false); })}/>}
   </div>;
 }
 
-function CookieImportModal({ close }: { close(): void }) {
+function FacebookLoginModal({ close, accounts, select }: { close(): void; accounts: Account[]; select(id: string): void }) {
+  const [method, setMethod] = useState<"browser" | "cookie">("browser");
+  const [existingId, setExistingId] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const facebookAccounts = accounts.filter(account => account.platform === "facebook");
+  const login = async () => {
+    if (!existingId && !name.trim()) { setMessage("กรุณาตั้งชื่อบัญชีในโปรแกรมก่อนดำเนินการ"); return; }
+    setBusy(true); setMessage("");
+    try {
+      setMessage("เปิด Chrome แล้ว กรุณาล็อกอินด้วยตนเอง จากนั้นปิดหน้าต่าง Chrome เพื่อให้ตรวจสอบสถานะบัญชี");
+      const output = existingId ? { accountId: existingId, session: await window.autopost.loginAndCheckFacebook(existingId) } : await window.autopost.createAndLoginFacebook(name.trim());
+      select(output.accountId);
+      const result = output.session;
+      setMessage(`ตรวจสอบสถานะบัญชี: ${result.status === "online" ? "ออนไลน์" : result.message} · Facebook: ${result.identity?.name || "ยังไม่ยืนยันชื่อ"} · ${result.identity?.actorType === "profile" ? "บัญชีส่วนตัว" : "ยังไม่ยืนยันประเภท"} · ${result.message}`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "ล็อกอินไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  return <Modal title="เพิ่ม / เข้าสู่ระบบ Facebook" close={() => { if (!busy) close(); }}><div className="fields">
+    <p>เลือกวิธีเข้าสู่ระบบ ทั้งสองวิธีใช้บัญชีและหน้าตรวจสถานะเดียวกัน ไม่ต้องส่งรหัสผ่านหรือ Cookie ในแชต</p>
+    <label>วิธีเข้าสู่ระบบ<select value={method} disabled={busy} onChange={e => setMethod(e.target.value as "browser" | "cookie")}><option value="browser">ปกติ — Chrome (บัญชีหรือเพจ)</option><option value="cookie">Cookie — บัญชีหรือเพจ</option></select></label>
+    <label>บัญชี<select value={existingId} disabled={busy} onChange={e => setExistingId(e.target.value)}><option value="">สร้างบัญชี Facebook ใหม่</option>{facebookAccounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+    {!existingId && <label>ชื่อบัญชีในโปรแกรม<input value={name} maxLength={80} disabled={busy} onChange={e => setName(e.target.value)} placeholder="เช่น Facebook ร้านหลัก"/></label>}
+    {method === "browser" ? <>
+      <p>เมื่อเข้าสู่ระบบเสร็จ ปิดหน้าต่าง Chrome แล้วโปรแกรมจะตรวจสถานะ ชื่อ รูป และประเภทที่ยืนยันได้</p>
+      <button className="primary" type="button" disabled={busy || (!existingId && !name.trim())} onClick={() => void login()}>{busy ? "รอปิด Chrome และตรวจสถานะ…" : "เปิด Chrome เพื่อล็อกอิน"}</button>
+    </> : <CookieImportForm existingId={existingId} name={name.trim()} onImported={rows => { if (rows.length) select(rows[0].accountId); }}/ >}
+    {message && <p role="status">{message}</p>}
+  </div></Modal>;
+}
+
+function CookieImportForm({ onImported, existingId, name }: { onImported(rows: { accountId: string; status: string; message: string }[]): void; existingId: string; name: string }) {
   const [progress, setProgress] = useState<{ current: number; total: number; status: string } | null>(null);
   useEffect(() => window.autopost.onSessionProgress(setProgress), []);
   const [input, setInput] = useState("");
@@ -197,20 +235,20 @@ function CookieImportModal({ close }: { close(): void }) {
   };
   const login = async () => {
     setBusy(true); setError(""); setResults([]);
-    try { setResults(await window.autopost.importCookies(input)); setInput(""); setCount(null); }
-    catch { setError("นำเข้าไม่สำเร็จ กรุณาตรวจรูปแบบ Cookie"); }
+    try { const rows = existingId ? [await window.autopost.importCookieForAccount(existingId, input)] : await window.autopost.importCookies(input, name); setResults(rows); onImported(rows); setInput(""); setCount(null); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "นำเข้าไม่สำเร็จ กรุณาตรวจรูปแบบ Cookie"); }
     finally { setBusy(false); }
   };
-  return <Modal title="นำเข้า Cookie Facebook" close={() => { if (!busy) close(); }}><div className="fields">
-    <p>ใช้เฉพาะ Cookie บัญชีของคุณ รองรับ JSON / Netscape / Raw หลายบัญชีคั่นด้วย ---ACCOUNT---</p>
+  return <div className="fields">
+    <p>ใช้เฉพาะ Cookie บัญชีของคุณ รองรับ JSON / Netscape / Raw {existingId ? "เลือกบัญชีเดิมจะตรวจหนึ่งชุดและไม่ทับ Session เดิม" : "หลายบัญชีคั่นด้วย ---ACCOUNT---"}</p>
     <textarea rows={12} value={input} autoComplete="off" spellCheck={false} disabled={busy} onChange={e => { setInput(e.target.value); setCount(null); }} placeholder="วาง Cookie ที่นี่ (ไม่บันทึกลง Log)"/>
     <button className="secondary" disabled={busy || !input.trim()} onClick={() => void preview()}>ตรวจจำนวนบัญชี</button>
     {count !== null && <p>ตรวจพบ {count} บัญชี</p>}
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">กำลังตรวจสอบบัญชี {progress?.current || 0}/{progress?.total || count || 0} กรุณารอสักครู่…<progress value={progress?.current || 0} max={progress?.total || count || 1}/></p>}
     {results.map(row => <p key={row.accountId}>{row.status}: {row.message}</p>)}
-    <button className="primary" disabled={busy || !count} onClick={() => void login()}>Login / สร้างบัญชี</button>
-  </div></Modal>;
+    <button className="primary" disabled={busy || !count || (!existingId && !name)} onClick={() => void login()}>Login / สร้างบัญชี</button>
+  </div>;
 }
 
 function SessionBackupModal({ mode, accountId, close }: { mode: "export" | "import"; accountId: string; close(): void }) {
@@ -240,15 +278,17 @@ function SessionBackupModal({ mode, accountId, close }: { mode: "export" | "impo
   </div></Modal>;
 }
 
-function AccountModal({ close, save }: { close(): void; save(input: { name: string; adapterType: AdapterType; secret?: string; proxyUrl?: string }): Promise<void> }) {
-  const [name, setName] = useState(""); const [type, setType] = useState<AdapterType>("facebook-browser"); const [secret, setSecret] = useState(""); const [proxy, setProxy] = useState("");
-  return <Modal title="เพิ่มบัญชี" close={close}><form onSubmit={(e) => { e.preventDefault(); void save({ name, adapterType: type, secret, proxyUrl: proxy }); }}>
-    <label>ชื่อบัญชี<input value={name} onChange={e => setName(e.target.value)} required placeholder="เช่น Facebook ร้านหลัก"/></label>
-    <label>วิธีเชื่อมต่อ<select value={type} onChange={e => setType(e.target.value as AdapterType)}><option value="facebook-browser">Facebook ผ่าน Chrome</option><option value="discord-webhook">Discord Webhook</option><option value="discord-bot">Discord Bot</option></select></label>
-    {type !== "facebook-browser" && <label>{type === "discord-bot" ? "Bot Token" : "Webhook URL"}<input type="password" value={secret} onChange={e => setSecret(e.target.value)} required/></label>}
-    {type === "facebook-browser" && <label>Proxy (ไม่บังคับ)<input value={proxy} onChange={e => setProxy(e.target.value)} placeholder="http://user:pass@host:port"/></label>}
-    <div className="modal-actions"><button type="button" className="secondary" onClick={close}>ยกเลิก</button><button className="primary">บันทึก</button></div>
-  </form></Modal>;
+function AccountModal({ close, openFacebook, save }: { close(): void; openFacebook(): void; save(input: { name: string; adapterType: AdapterType; secret?: string }): Promise<void> }) {
+  const [name, setName] = useState(""); const [type, setType] = useState<AdapterType>("facebook-browser"); const [secret, setSecret] = useState("");
+  return <Modal title="เพิ่มบัญชี" close={close}><div className="fields">
+    <label>แพลตฟอร์ม<select value={type} onChange={e => setType(e.target.value as AdapterType)}><option value="facebook-browser">Facebook — Chrome หรือ Cookie</option><option value="discord-webhook">Discord Webhook</option><option value="discord-bot">Discord Bot</option></select></label>
+    {type === "facebook-browser" ? <p>เลือกวิธีล็อกอินในขั้นถัดไป แล้วตรวจสถานะและชื่อ Facebook จาก Session</p> : <form onSubmit={e => { e.preventDefault(); void save({ name, adapterType: type, secret }); }}>
+      <label>ชื่อบัญชี<input value={name} onChange={e => setName(e.target.value)} required placeholder="เช่น Discord ร้านหลัก"/></label>
+      <label>{type === "discord-bot" ? "Bot Token" : "Webhook URL"}<input type="password" value={secret} onChange={e => setSecret(e.target.value)} required/></label>
+      <div className="modal-actions"><button type="button" className="secondary" onClick={close}>ยกเลิก</button><button className="primary">บันทึกบัญชี Discord</button></div>
+    </form>}
+    {type === "facebook-browser" && <div className="modal-actions"><button type="button" className="secondary" onClick={close}>ยกเลิก</button><button type="button" className="primary" onClick={openFacebook}>เลือกวิธีล็อกอิน Facebook</button></div>}
+  </div></Modal>;
 }
 
 function DestinationModal({ account, close, save }: { account: Account; close(): void; save(input: { accountId: string; kind: DestinationKind; name: string; remoteId?: string; url?: string }): Promise<void> }) {
@@ -270,23 +310,24 @@ function GroupsModal({ account, close, save }: { account: Account; close(): void
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState("");
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   useEffect(() => {
     setLoading(true); setFailure("");
     void window.autopost.discoverFacebookGroups(account.id)
-      .then((result) => { setGroups(result); setSelected(new Set(result.map(g => g.id))); })
+      .then((result) => { setGroups(result); setBrokenImages(new Set()); setSelected(new Set(result.map(g => g.id))); })
       .catch((error) => setFailure(error instanceof Error ? error.message : String(error)))
       .finally(() => setLoading(false));
   }, [account.id, refreshKey]);
   const visible = useMemo(() => groups.filter(group => `${group.name} ${group.id}`.toLowerCase().includes(query.toLowerCase())), [groups, query]);
   const toggle = (id: string) => setSelected(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return <Modal title="เลือกกลุ่ม Facebook" close={close}><div className="group-picker">
-    <div className="group-search"><span>ดึงได้จริง {groups.length} กลุ่ม (เฉพาะที่บัญชีเข้าถึงได้)</span><button className="secondary small" disabled={loading} onClick={() => setRefreshKey(key => key + 1)}>บังคับรีเฟรชกลุ่ม</button></div>
-    <div className="group-search"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="ค้นหาชื่อกลุ่ม..."/><button className="secondary small" onClick={() => setSelected(new Set(visible.map(g => g.id)))}>เลือกทั้งหมด</button><button className="secondary small" onClick={() => setSelected(new Set())}>ไม่เลือก</button></div>
+    <div className="group-search"><span>🖼️ พบ {groups.length} กลุ่ม · มีรูป {groups.filter(group => group.imageUrl && !brokenImages.has(group.id)).length} กลุ่ม</span><button className="secondary small" disabled={loading} onClick={() => setRefreshKey(key => key + 1)}>🔄 รีเฟรชกลุ่ม</button></div>
+    <div className="group-search"><input value={query} onChange={e => setQuery(e.target.value)} placeholder="🔎 ค้นหาชื่อกลุ่ม..."/><button className="secondary small" onClick={() => setSelected(new Set(visible.map(g => g.id)))}>☑️ เลือกทั้งหมด</button><button className="secondary small" onClick={() => setSelected(new Set())}>◻️ ไม่เลือก</button></div>
     {loading && <div className="group-loading"><RefreshCw/>กำลังดึงชื่อและรูปกลุ่มจาก Facebook...</div>}
     {failure && <div className="group-failure">{failure}</div>}
-    {!loading && !failure && <div className="group-grid">{visible.map(group => <label className={selected.has(group.id) ? "group-card selected" : "group-card"} key={group.id}>
-      <input type="checkbox" checked={selected.has(group.id)} onChange={() => toggle(group.id)}/>{group.imageUrl ? <img src={group.imageUrl} alt="" referrerPolicy="no-referrer"/> : <div className="group-placeholder">f</div>}<span><b>{group.name}</b><small>{group.id}</small><button type="button" className="delete-discovered-group" disabled={deleting !== null} onClick={e => {
+    {!loading && !failure && <div className="group-grid">{visible.map(group => <div className={selected.has(group.id) ? "group-card selected" : "group-card"} key={group.id}>
+      <label className="group-card-selection" title={group.name}><input type="checkbox" checked={selected.has(group.id)} onChange={() => toggle(group.id)} aria-label={`เลือกกลุ่ม ${group.name}`}/>{group.imageUrl && !brokenImages.has(group.id) ? <img src={group.imageUrl} alt="" referrerPolicy="no-referrer" onError={() => setBrokenImages(current => new Set(current).add(group.id))}/> : <span className="group-placeholder" title="Facebook ไม่ส่งรูปกลุ่ม">f</span>}<span className="group-card-info"><b title={group.name}>{group.name}</b><small title={group.id}>{group.id}</small>{FEATURES.groupPermissionCheck && <small>สิทธิ์โพสต์: {group.postPermission === "allowed" ? "อนุญาต" : group.postPermission === "denied" ? "ไม่อนุญาต" : "ยังไม่ตรวจ"} · แชร์: {group.sharePermission === "allowed" ? "อนุญาต" : group.sharePermission === "denied" ? "ไม่อนุญาต" : "ยังไม่ตรวจ"}</small>}</span></label><button type="button" className="delete-discovered-group" disabled={deleting !== null} onClick={e => {
         e.preventDefault(); e.stopPropagation();
         setDeleting(group.id);
         void window.autopost.deleteFacebookGroup(account.id, group.id).then(deleted => {
@@ -294,10 +335,10 @@ function GroupsModal({ account, close, save }: { account: Account; close(): void
           setGroups(current => current.filter(row => row.id !== group.id));
           setSelected(current => { const next = new Set(current); next.delete(group.id); return next; });
         }).catch(error => setFailure(error instanceof Error ? error.message : "ลบกลุ่มไม่สำเร็จ")).finally(() => setDeleting(null));
-      }}>{deleting === group.id ? "กำลังลบ…" : "ลบกลุ่มจากรายการ"}</button></span>
-    </label>)}</div>}
+      }}>{deleting === group.id ? "⏳ กำลังลบ…" : "🗑️ ลบจากรายการ"}</button>
+    </div>)}</div>}
     {!loading && !failure && !groups.length && <div className="empty">ไม่พบกลุ่ม ลองเปิด Chrome และตรวจว่าบัญชีล็อกอินอยู่</div>}
-    <div className="modal-actions"><span className="selection-count">เลือก {selected.size} กลุ่ม</span><button className="secondary" onClick={close}>ยกเลิก</button><button className="primary" disabled={!selected.size} onClick={() => void save(groups.filter(g => selected.has(g.id)))}>เพิ่มกลุ่มที่เลือก</button></div>
+    <div className="modal-actions"><span className="selection-count">✅ เลือก {selected.size} กลุ่ม</span><button className="secondary" onClick={close}>ยกเลิก</button><button className="primary" disabled={!selected.size} onClick={() => void save(groups.filter(g => selected.has(g.id)))}>➕ เพิ่มกลุ่มที่เลือก</button></div>
   </div></Modal>;
 }
 
@@ -355,8 +396,10 @@ function Composer({ accounts, destinations, mutate }: { accounts: Account[]; des
           const mapping = projectSettings.mappings.find(row => row.destinationId === content.destinationId);
           const destination = choices.find(row => row.id === content.destinationId)!;
           return { targetUrl: destination.url, caption: content.caption, media: content.media, headless: projectSettings.headless,
-            delayMin: projectSettings.delayMin, delayMax: projectSettings.delayMax, commentEnabled: projectSettings.commentEnabled,
-            likeEnabled: projectSettings.likeEnabled, shareEnabled: projectSettings.shareEnabled,
+            delayMin: projectSettings.delayMin, delayMax: projectSettings.delayMax,
+            commentEnabled: FEATURES.workflowFollowUp && FEATURES.comment && projectSettings.commentEnabled,
+            likeEnabled: FEATURES.workflowFollowUp && FEATURES.like && projectSettings.likeEnabled,
+            shareEnabled: FEATURES.workflowFollowUp && FEATURES.share && projectSettings.shareEnabled,
             commentTemplates: mapping?.comment || mapping?.commentImage ? [{ text: mapping.comment, image: mapping.commentImage }] : projectSettings.commentTemplates,
             repeatMinutes: projectSettings.repeatShareMinutes, shareTargets: destinations.filter(row => row.accountId === accountId && projectSettings.shareDestinationIds.includes(row.id)).map(row => {
               const override = projectSettings.mappings.find(item => item.destinationId === row.id);
@@ -393,12 +436,13 @@ function Composer({ accounts, destinations, mutate }: { accounts: Account[]; des
       <div className="date-time-fields"><label>พักต่ำสุด (วินาที)<input type="number" min={0} max={86400} step={1} value={projectSettings.delayMin} onChange={e => setProjectExtras(current => ({ ...current, delayMin: Number(e.target.value) }))}/></label><label>พักสูงสุด (วินาที)<input type="number" min={0} max={86400} step={1} value={projectSettings.delayMax} onChange={e => setProjectExtras(current => ({ ...current, delayMax: Number(e.target.value) }))}/></label></div>
       <p role="status">{validateDelay(projectSettings.delayMin, projectSettings.delayMax) || (projectSettings.delayMin === projectSettings.delayMax ? `พักคงที่ ${projectSettings.delayMin} วินาที` : `สุ่มพัก ${projectSettings.delayMin}–${projectSettings.delayMax} วินาที`)}</p><button type="button" className="primary" disabled={!!validateDelay(projectSettings.delayMin, projectSettings.delayMax)} onClick={() => setSettingsPanel(null)}>ใช้ดีเลย์นี้</button>
     </div></Modal>}
-    <div className="compose-commandbar"><span><b>ตั้งค่างานโพสต์</b><small>โพสต์ใช้ข้อความและสื่อจากช่องหลักเท่านั้น</small></span><button type="button" className="secondary small" onClick={() => setSettingsPanel("project")}>โปรเจกต์ / บันทึกชุดงาน</button><button type="button" className="secondary small" onClick={() => setSettingsPanel("mapping")}>ความคิดเห็น / แชร์รายกลุ่ม</button><button type="button" className="secondary small" onClick={() => setSettingsPanel("actions")}>ความคิดเห็น / แชร์ / ถูกใจ</button></div>
+    <div className="compose-commandbar"><span><b>ตั้งค่างานโพสต์</b><small>โพสต์ใช้ข้อความและสื่อจากช่องหลักเท่านั้น</small></span><button type="button" className="secondary small" onClick={() => setSettingsPanel("project")}>โปรเจกต์ / บันทึกชุดงาน</button></div>
+    <p className="form-hint compose-feature-note" role="note">ฟีเจอร์คอมเมนต์ / แชร์ / ไลค์ ยังปิดใช้งานอยู่ สามารถเปิดได้ภายหลัง</p>
     <div hidden={settingsPanel !== "project"} className="project-modal-host"><Modal title="โปรเจกต์ / บันทึกและโหลดชุดงาน" close={() => setSettingsPanel(null)}><ProjectToolbar settings={projectSettings} load={loadProject}/></Modal></div>
     <div className="panel compose-main"><div className="panel-title"><div><h2>1. ข้อความโพสต์หลักและสื่อ</h2><p title={accounts.find(account => account.id === accountId)?.name}>ใช้โพสต์ทุกกลุ่มที่เลือก · ไม่ถูกแทนที่ด้วยความคิดเห็น/แชร์</p></div><span className="counter">{caption.length} ตัวอักษร</span></div>
     <textarea aria-label="ข้อความโพสต์หลัก" rows={10} value={caption} onChange={e => setCaption(e.target.value)} placeholder="เขียนข้อความโพสต์หลักที่นี่ ใช้ข้อความนี้กับทุกกลุ่มที่เลือก"/>
     <MediaPreview paths={media}/>
-    {settingsPanel === "mapping" && <Modal title={`ความคิดเห็น / แชร์รายกลุ่ม (${selected.length} ปลายทาง)`} close={() => setSettingsPanel(null)}><div className="mapping-editor"><p>ตั้งค่าสำหรับขั้นตอนหลังโพสต์เท่านั้น ไม่เปลี่ยนข้อความหรือรูปโพสต์หลัก ความคิดเห็นที่ว่างใช้ Template ส่วนข้อความแชร์ที่ว่างจะแชร์โดยไม่เพิ่มข้อความ</p>
+    {FEATURES.workflowFollowUp && settingsPanel === "mapping" && <Modal title={`ความคิดเห็น / แชร์รายกลุ่ม (${selected.length} ปลายทาง)`} close={() => setSettingsPanel(null)}><div className="mapping-editor"><p>ตั้งค่าสำหรับขั้นตอนหลังโพสต์เท่านั้น ไม่เปลี่ยนข้อความหรือรูปโพสต์หลัก ความคิดเห็นที่ว่างใช้ Template ส่วนข้อความแชร์ที่ว่างจะแชร์โดยไม่เพิ่มข้อความ</p>
       {choices.filter(choice => selected.includes(choice.id)).map(choice => {
         const mapping = projectSettings.mappings.find(row => row.destinationId === choice.id);
         const update = (changes: Partial<WorkspaceSettings["mappings"][number]>) => setProjectExtras(current => {
@@ -417,7 +461,7 @@ function Composer({ accounts, destinations, mutate }: { accounts: Account[]; des
       <Plus/><b>ลากรูปหรือวิดีโอมาวาง</b><span>หรือคลิกเพื่อเลือกไฟล์ สูงสุด 10 ไฟล์</span></div>
     <div className="media-list">{media.map(path => <div key={path}><span>{path.split(/[\\/]/).pop()}</span><button type="button" onClick={() => setMedia(media.filter(x => x !== path))}><X/></button></div>)}</div>
   </div><div className="panel fields compose-targets"><h2 className="form-step">2. บัญชีและกลุ่ม</h2><label>บัญชีที่ใช้โพสต์<select value={accountId} onChange={e => switchProjectAccount(e.target.value)} required><option value="">เลือกบัญชี</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label><small>ตั้งค่าแยก {projectSettings.accounts.length} บัญชี · เลือกปลายทางด้านล่าง</small>
-    {settingsPanel === "actions" && <Modal title="ขั้นตอนหลังโพสต์และการทำงาน Chrome" close={() => setSettingsPanel(null)}><div className="fields">
+    {FEATURES.workflowFollowUp && settingsPanel === "actions" && <Modal title="ขั้นตอนหลังโพสต์และการทำงาน Chrome" close={() => setSettingsPanel(null)}><div className="fields">
     <div className="date-time-fields"><label>พักต่ำสุด (วินาที)<input type="number" min={0} max={86400} value={projectSettings.delayMin} onChange={e => setProjectExtras(current => ({ ...current, delayMin: Number(e.target.value) }))}/></label><label>พักสูงสุด (วินาที)<input type="number" min={projectSettings.delayMin} max={86400} value={projectSettings.delayMax} onChange={e => setProjectExtras(current => ({ ...current, delayMax: Number(e.target.value) }))}/></label></div>
     <label>โหมด Chrome<select value={projectSettings.headless === null ? "account" : projectSettings.headless ? "headless" : "headed"} onChange={e => setProjectExtras(current => ({ ...current, headless: e.target.value === "account" ? null : e.target.value === "headless" }))}><option value="account">ใช้ค่าบัญชี</option><option value="headless">ไม่แสดงหน้าต่าง</option><option value="headed">แสดงหน้าต่าง</option></select></label>
     <div className="workflow-heading"><b>3. ขั้นตอนหลังโพสต์ (เปิด–ปิดแยกได้)</b><small>โพสต์ตามเวลาที่ตั้ง แล้วทำเฉพาะขั้นตอนที่เปิดไว้ หากขั้นตอนใดไม่สำเร็จจะหยุดขั้นตอนถัดไป</small></div>
@@ -430,8 +474,8 @@ function Composer({ accounts, destinations, mutate }: { accounts: Account[]; des
       if (!groupId) throw new Error("ไม่พบรหัสกลุ่ม กรุณาจัดการปลายทางในหน้าบัญชี");
       await window.autopost.deleteFacebookGroup(dest.accountId, groupId);
     })}><Trash2 size={15}/><span>ลบ</span></button>}</div>)}</div>
-    </div><div className="panel fields compose-schedule"><h2 className="form-step">3. เวลาและเริ่มงาน</h2><div className="compose-enabled-summary"><span>ความคิดเห็น: {projectSettings.commentEnabled ? "เปิด" : "ปิด"}</span><span>แชร์: {projectSettings.shareEnabled ? "เปิด" : "ปิด"}</span><span>ถูกใจ: {projectSettings.likeEnabled ? "เปิด" : "ปิด"}</span><button type="button" className="secondary small" onClick={() => setSettingsPanel("actions")}>ตั้งค่าขั้นตอนหลังโพสต์</button><button type="button" className="secondary small" onClick={() => setSettingsPanel("delay")}>ตั้งดีเลย์ · {projectSettings.delayMin === projectSettings.delayMax ? projectSettings.delayMin : `${projectSettings.delayMin}–${projectSettings.delayMax}`} วินาที</button></div>
-    <div className="schedule-box"><div className="schedule-title"><div><b>เวลาเริ่มโพสต์</b><small>ขั้นตอนที่เปิดไว้จะทำต่อหลังโพสต์</small></div><span className="timezone-badge">UTC+7</span></div>
+    </div><div className="panel fields compose-schedule"><h2 className="form-step">3. เวลาและเริ่มงาน</h2><div className="compose-enabled-summary"><span>โหมด: โพสต์หลักเท่านั้น</span><button type="button" className="secondary small" onClick={() => setSettingsPanel("delay")}>ตั้งดีเลย์ · {projectSettings.delayMin === projectSettings.delayMax ? projectSettings.delayMin : `${projectSettings.delayMin}–${projectSettings.delayMax}`} วินาที</button></div>
+    <div className="schedule-box"><div className="schedule-title"><div><b>เวลาเริ่มโพสต์</b><small>สำเร็จเมื่อยืนยัน permalink ได้เท่านั้น</small></div><span className="timezone-badge">UTC+7</span></div>
       <div className="quick-times"><button type="button" className={preset === "now" ? "active" : ""} onClick={() => choosePreset("now", thaiInputTime(1))}>เร็วที่สุด</button><button type="button" className={preset === "10m" ? "active" : ""} onClick={() => choosePreset("10m", thaiInputTime(10))}>+10 นาที</button><button type="button" className={preset === "30m" ? "active" : ""} onClick={() => choosePreset("30m", thaiInputTime(30))}>+30 นาที</button><button type="button" className={preset === "1h" ? "active" : ""} onClick={() => choosePreset("1h", thaiInputTime(60))}>+1 ชั่วโมง</button><button type="button" className={preset === "tomorrow" ? "active" : ""} onClick={() => choosePreset("tomorrow", tomorrowMorningThai())}>พรุ่งนี้ 09:00</button></div>
       <div className="date-time-fields"><label>วันที่<input type="date" min={thaiInputTime(0).slice(0, 10)} value={runAt.slice(0, 10)} onChange={e => changeSchedulePart("date", e.target.value)} required/></label><div><span className="time24-label">เวลา (24 ชั่วโมง)</span><Time24Picker value={runAt.slice(11, 16)} onChange={value => changeSchedulePart("time", value)}/></div></div>
       <div className="schedule-confirm"><CalendarClock/><span>ระบบจะเริ่มโพสต์ <b>{formatThaiTime(thaiInputToUtc(runAt))} น.</b></span></div>

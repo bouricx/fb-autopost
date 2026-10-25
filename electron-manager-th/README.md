@@ -56,4 +56,4 @@ Facebook เปลี่ยน DOM ได้เสมอ หากหา compose
 
 ## การตรวจและแก้บั๊ก 25 ตุลาคม 2026
 
-ดู [รายงานการแก้ไขและหลักฐานทดสอบ](docs/AUDIT-FIXES-2026-10-25.md) สำหรับ queue lifecycle, Discord delivery, หยุดตาราง, graceful shutdown และข้อจำกัดของการตรวจ รุ่นซอร์สนี้ยังเป็น 0.5.0 ไม่ใช่ไฟล์ติดตั้ง 0.6.10 บนเครื่องผู้ใช้
+ดู [รายงานการแก้ไขและหลักฐานทดสอบ](docs/AUDIT-FIXES-2026-10-25.md) สำหรับ queue lifecycle, Discord delivery, หยุดตาราง, graceful shutdown และข้อจำกัดของการตรวจ รุ่นแก้ไขนี้เป็น 0.6.11 โดยรวมซอร์ส upstream 0.6.10 แล้ว มี Windows CI build installer; ไฟล์ติดตั้งในเครื่องผู้ใช้จะไม่เปลี่ยนเอง

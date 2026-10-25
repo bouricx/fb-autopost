@@ -3,11 +3,17 @@ import type Database from "better-sqlite3";
 import { actionPayloadSchema, type ActionKind, type ActionPayload, type AutomationTask } from "./contracts";
 import { delayMilliseconds } from "../../src/shared/delay";
 import { idempotencyKey } from "../core/queue-safety";
+import { FEATURES, assertActionEnabled, type FeatureFlags } from "../../src/shared/features";
 
 export class TaskManager {
-  constructor(readonly db: Database.Database) {}
+  constructor(readonly db: Database.Database, private readonly features: FeatureFlags = FEATURES) {}
   create(accountId: string, action: ActionKind, payload: unknown, scheduledAt = new Date().toISOString(), projectId: string | null = null, parentId: string | null = null, stableKey?: string) {
+    if (action !== "post" && !this.features[action]) assertActionEnabled(action);
+    if (action === "post" && parentId && !this.features.workflowFollowUp) throw new Error("ฟีเจอร์ขั้นตอนต่อเนื่องยังปิดใช้งานอยู่");
     const parsed = actionPayloadSchema.parse(payload);
+    if (action === "post" && !this.features.workflowFollowUp && (parsed.commentEnabled || parsed.shareEnabled || parsed.likeEnabled)) {
+      throw new Error("ฟีเจอร์คอมเมนต์ / แชร์ / ไลค์ ยังปิดใช้งานอยู่ กรุณาปิดขั้นตอนต่อเนื่องก่อนเพิ่มคิว");
+    }
     if (action === "post" && !parsed.caption.trim() && !parsed.media.length) throw new Error("กรุณาระบุข้อความหรือสื่อ");
     if (action === "post" && parsed.commentEnabled && !parsed.commentTemplates.some(template => template.text.trim() || template.image)) throw new Error("เปิดความคิดเห็นแล้ว กรุณาเพิ่มข้อความหรือรูป Template");
     if (action === "post" && parsed.shareEnabled && !parsed.shareTargets.length) throw new Error("เปิดแชร์แล้ว กรุณาเลือกกลุ่มแชร์");
@@ -33,7 +39,7 @@ export class TaskManager {
   }
   due(excluded: Set<string>): AutomationTask | undefined {
     this.db.prepare(`WITH RECURSIVE blocked(id) AS (
-      SELECT id FROM automation_tasks WHERE status IN ('failed','uncertain','cancelled','skipped')
+      SELECT id FROM automation_tasks WHERE status IN ('failed','uncertain','cancelled','skipped','pending_approval')
       UNION SELECT child.id FROM automation_tasks child JOIN blocked ON child.parent_id=blocked.id
     ) UPDATE automation_tasks SET status='cancelled',last_error='หยุดเพราะขั้นตอนก่อนหน้าไม่สำเร็จ' WHERE status IN ('pending','review_required') AND parent_id IN (SELECT id FROM blocked)`).run();
     const timestamp = new Date().toISOString();
@@ -67,6 +73,7 @@ export class TaskManager {
   }
   recover() { this.db.prepare("UPDATE automation_tasks SET status='uncertain',submission_state='unknown',last_error='โปรแกรมปิดระหว่างทำงาน กรุณาตรวจ Facebook ก่อนเริ่มใหม่' WHERE status='running'").run(); }
   followUps(task: AutomationTask, url: string) {
+    if (!this.features.workflowFollowUp) return;
     this.db.transaction(() => {
       if (task.payload.scheduleId) {
         const schedule = this.db.prepare("SELECT enabled FROM daily_schedules WHERE id=?").get(task.payload.scheduleId) as { enabled: number } | undefined;

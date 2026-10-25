@@ -13,6 +13,10 @@ export interface PublishContext {
 }
 
 export interface PublishResult {
+  status?: "published" | "pending_approval";
+  message?: string;
+  permalink?: string;
+  screenshot?: string;
   publishedUrl?: string;
   remoteId?: string;
 }

@@ -1,0 +1,50 @@
+name: Electron Windows build and verification
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'electron-manager-th/**'
+      - '.github/workflows/electron-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: electron-manager-th
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: electron-manager-th/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build Windows installer
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify packaged desktop with posting disabled
+        shell: pwsh
+        run: |
+          $env:AUTOPOST_EXE = Join-Path (Get-Location) 'dist/win-unpacked/AutoPost Manager TH.exe'
+          $env:AUTOPOST_SCREENSHOTS = Join-Path $env:RUNNER_TEMP 'autopost-desktop-screenshots'
+          node scripts/check-desktop.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoPost-Manager-TH-Windows
+          path: |
+            electron-manager-th/dist/*Setup*.exe
+            electron-manager-th/dist/*.blockmap
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AutoPost-desktop-verification
+          path: ${{ runner.temp }}/autopost-desktop-screenshots
+          if-no-files-found: ignore

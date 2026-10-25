@@ -8,9 +8,9 @@ afterEach(()=>{databases.forEach(db=>db.close());databases.length=0;});
 it("stopping cancels held/pending descendants and prevents follow-ups after a running parent finishes",()=>{
  const db=new AppDatabase(':memory:');databases.push(db);
  const account=db.createAccount({name:'fixture',adapterType:'facebook-browser'},null,'/tmp/mock-profile');
- const schedules=new ScheduleManager(db.db),tasks=new TaskManager(db.db);
- const id=schedules.create({accountId:account.id,name:'fixture',startDate:'2099-01-01',daily:false,times:['09:00'],payloads:[{targetUrl:'https://www.facebook.com/groups/123',caption:'fixture',likeEnabled:true}]});
- const parent=tasks.list()[0];
+ const schedules=new ScheduleManager(db.db),tasks=new TaskManager(db.db,{comment:true,share:true,like:true,workflowFollowUp:true,pendingApprovalDetector:false,groupPermissionCheck:false});
+ const id=schedules.create({accountId:account.id,name:'fixture',startDate:'2099-01-01',daily:false,times:['09:00'],payloads:[{targetUrl:'https://www.facebook.com/groups/123',caption:'fixture'}]});
+ const parent=tasks.list()[0];parent.payload.likeEnabled=true;
  db.db.prepare("UPDATE automation_tasks SET status='running' WHERE id=?").run(parent.id);
  const held=tasks.create(account.id,'like',{targetUrl:'https://www.facebook.com/posts/123'},undefined,null,parent.id);
  db.db.prepare("UPDATE automation_tasks SET status='review_required' WHERE id=?").run(held);

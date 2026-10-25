@@ -1,0 +1,15 @@
+.accounts-layout{grid-template-columns:minmax(330px,.9fr) minmax(430px,1.1fr);align-items:start;gap:16px}
+.accounts-layout>.account-session-panel{grid-row:1 / span 2;padding:22px}
+.accounts-layout>.panel{min-width:0}
+.account-session-details{display:grid;gap:14px}
+.session-summary{display:grid;gap:5px;padding:15px;border:1px solid #ffffff14;border-radius:13px;background:#ffffff05;overflow-wrap:anywhere}
+.session-summary b{font-size:16px}.session-summary span{font-size:12px;color:#aab7cc;line-height:1.55}
+.session-rename{justify-self:start}.session-rename-form{display:flex;align-items:end;gap:8px;flex-wrap:wrap}
+.session-rename-form label{display:grid;gap:5px;flex:1;min-width:180px;font-size:12px;color:#aab7cc}
+.session-rename-form input{width:100%}.session-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.session-action-grid button{min-width:0;white-space:normal;text-align:center}.session-more{border-top:1px solid #ffffff14;padding-top:13px}
+.session-more summary{cursor:pointer;color:#aabde4;font-size:13px}.session-more>.session-action-grid{margin:13px 0}
+.session-more label{display:flex;align-items:center;gap:8px;font-size:12px;color:#aab7cc}.session-more small{display:block;color:#8795ad;margin:10px 0}
+.session-more>.danger{width:100%}
+.session-summary .session-paused-warning{color:#ffd394;font-weight:600}
+@media(max-width:1120px){.accounts-layout{grid-template-columns:1fr}.accounts-layout>.account-session-panel{grid-row:auto}}

@@ -1,0 +1,26 @@
+/* Keep each group self-contained; old two-column label rules cannot size long names. */
+.modal:has(.group-picker){width:min(980px,calc(100vw - 48px));max-width:980px;max-height:calc(100vh - 48px);display:flex;flex-direction:column;min-height:0}
+.modal:has(.group-picker) .group-picker{flex:1;min-height:0;gap:12px}
+.modal:has(.group-picker) .modal-head{flex:none}
+.group-picker .group-search{grid-template-columns:minmax(0,1fr) auto auto;align-items:center;min-width:0}
+.group-picker .group-search:first-child{grid-template-columns:minmax(0,1fr) auto}
+.group-picker .group-search>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.group-picker .group-search>input{width:100%;min-width:0}
+.group-picker .group-grid{grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:166px;align-content:start;gap:10px;flex:1;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding:2px 4px 2px 2px}
+.group-picker .group-card{display:flex;flex-direction:column;align-items:stretch;justify-content:space-between;gap:8px;width:100%;min-width:0;min-height:0;overflow:hidden;padding:12px}
+.group-picker .group-card-selection{position:relative;display:flex;align-items:flex-start;gap:11px;flex:1;min-width:0;min-height:0;cursor:pointer}
+.group-picker .group-card-selection>input{position:absolute;right:0;top:0;width:17px;height:17px;margin:0;accent-color:#7196ff}
+.group-picker .group-card-selection>img,.group-picker .group-card-selection>.group-placeholder{flex:none;width:48px;height:48px;border-radius:10px;object-fit:cover}
+.group-picker .group-card-info{display:block;min-width:0;flex:1;padding-right:23px;overflow:hidden}
+.group-picker .group-card-info>b{display:-webkit-box;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35;max-height:2.7em;white-space:normal;overflow-wrap:anywhere;font-size:13px;padding:0}
+.group-picker .group-card-info>small{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;margin-top:5px}
+.group-picker .group-card-info>small:nth-of-type(2){white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.25}
+.group-picker .delete-discovered-group{align-self:flex-start;flex:none;max-width:100%;margin:0;white-space:nowrap}
+.group-picker button,.group-picker .group-card{transition:background-color .2s ease,border-color .2s ease,box-shadow .2s ease,transform .2s ease}
+.group-picker button:not(:disabled):hover{border-color:#84a7ff;background-color:#3c67b633;box-shadow:0 0 0 1px #608eff88,0 0 20px #5789ff55;transform:translateY(-1px)}
+.group-picker .group-card:hover,.group-picker .group-card:focus-within{border-color:#7da3ff;box-shadow:0 0 0 1px #6e95ff77,0 0 22px #4d7fff35}
+.group-picker button:focus-visible,.group-picker .group-card-selection>input:focus-visible{outline:2px solid #a4baff;outline-offset:3px}
+.group-picker .primary:not(:disabled):hover{background:linear-gradient(135deg,#4d9cff,#8c69ff);box-shadow:0 0 24px #647cff88}
+.group-picker .modal-actions{flex:none;align-items:center;flex-wrap:wrap;margin-top:0}
+@media(max-width:850px){.group-picker .group-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:570px){.group-picker .group-grid{grid-template-columns:1fr}.group-picker .group-search{grid-template-columns:1fr auto}.group-picker .group-search>input{grid-column:1/-1}.group-picker .group-search:first-child{grid-template-columns:1fr}}

@@ -1,7 +1,7 @@
 import type { Locator, Page } from "playwright-core";
 import { ActionBlockedError } from "./contracts";
 
-export async function findCommentComposer(post: Locator, page: Page, timeout = 15_000): Promise<Locator> {
+export async function findCommentComposer(post: Locator, page: Page, timeout = 20_000): Promise<Locator> {
   let opened = false;
   const deadline = Date.now() + timeout;
   do {
@@ -10,18 +10,21 @@ export async function findCommentComposer(post: Locator, page: Page, timeout = 1
       const item = candidates.nth(index);
       const label = [await item.getAttribute("aria-label"), await item.getAttribute("aria-placeholder"), await item.getAttribute("placeholder")].filter(Boolean).join(" ");
       if (/reply|ตอบกลับ/i.test(label)) continue;
-      if (/comment|แสดงความคิดเห็น|เขียนความคิดเห็น/i.test(label) && await item.isVisible() && await item.isEditable()) return item;
+      if (/comment|แสดงความคิดเห็น|เขียนความคิดเห็น|Write a comment/i.test(label) && await item.isVisible() && await item.isEditable()) return item;
     }
     const text = await post.innerText().catch(() => "");
-    if (/comments? (?:are|is) turned off|turned off commenting|ปิด(?:การแสดง)?ความคิดเห็น|ไม่สามารถแสดงความคิดเห็นในโพสต์นี้/i.test(text)) throw new ActionBlockedError("โพสต์นี้แจ้งว่าปิดความคิดเห็นหรือไม่อนุญาตให้แสดงความคิดเห็น");
+    if (/comments? (?:are|is) turned off|turned off commenting|ปิด(?:การแสดง)?ความคิดเห็น|ไม่สามารถแสดงความคิดเห็น/i.test(text)) throw new ActionBlockedError("โพสต์นี้ปิดความคิดเห็นหรือไม่อนุญาตให้แสดงความคิดเห็น");
     if (!opened) {
-      const controls = post.getByRole("button", { name: /^(Comment|Comments?|แสดงความคิดเห็น|ความคิดเห็น)(?:\s*\d.*)?$/i });
+      const controls = post.getByRole("button", { name: /^(Comment|Comments?|แสดงความคิดเห็น|ความคิดเห็น|Write a comment)(?:\s*\d.*)?$/i });
       for (let index = 0; index < await controls.count(); index++) {
         const control = controls.nth(index);
-        if (await control.isVisible() && await control.isEnabled()) { await control.click(); opened = true; break; }
+        if (await control.isVisible() && await control.isEnabled()) {
+          const clicked = await control.click({ timeout: 3000 }).then(() => true, () => false);
+          if (clicked) { opened = true; await page.waitForTimeout(900); break; }
+        }
       }
     }
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
   } while (Date.now() < deadline);
   throw new ActionBlockedError(opened ? "เปิดส่วนความคิดเห็นแล้ว แต่ยังไม่พบช่องพิมพ์ที่ใช้งานได้ อาจโหลดไม่เสร็จหรือรูปแบบ Facebook เปลี่ยน" : "ไม่พบช่องหรือปุ่มเปิดความคิดเห็นในโพสต์เป้าหมาย ยังไม่ยืนยันว่าโพสต์ปิดความคิดเห็น กรุณาตรวจสิทธิ์หรือรูปแบบหน้าเว็บ");
 }

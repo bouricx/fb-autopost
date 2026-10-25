@@ -29,7 +29,7 @@ describe("Facebook action safeguards", () => {
       return { count: async () => 1, first: () => post };
     } };
     const adapter = { withActionPage: async (_account: Account, callback: (page: Page) => Promise<unknown>) => callback(page as unknown as Page) };
-    const actions = new FacebookActions(adapter as unknown as FacebookBrowserAdapter, "unused");
+    const actions = new FacebookActions(adapter as unknown as FacebookBrowserAdapter, "unused", { comment: true, share: true, like: true, workflowFollowUp: true, pendingApprovalDetector: true, groupPermissionCheck: true });
     const result = await actions.execute("like", {} as Account, actionPayloadSchema.parse({ targetUrl: page.url() }), vi.fn());
     expect(result.message).toContain("อยู่แล้ว"); expect(click).not.toHaveBeenCalled();
   });

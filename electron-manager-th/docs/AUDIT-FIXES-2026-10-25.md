@@ -2,8 +2,8 @@
 
 ## รุ่นและขอบเขต
 
-ซอร์สฐานคือ main commit 67ffd08 (Electron 0.5.0) พร้อม Python Desktop 1.3.1 ที่ราก repository
-ไฟล์ D:\AutoPost Manager\AutoPost Manager TH Setup 0.6.10.exe อยู่บนเครื่องผู้ใช้ ไม่ได้อยู่ใน environment นี้ จึงไม่ได้แก้หรือรับรอง executable นั้น และไม่ได้เปลี่ยนเลขรุ่นของซอร์สให้ดูเหมือน 0.6.10
+เริ่มตรวจจาก main commit 67ffd08 (Electron 0.5.0) แล้วระหว่างทำงาน upstream เพิ่ม commit 755689c พร้อม tag v0.6.10 จึงรวม source 0.6.10 เข้ามาทั้งหมดและรันทดสอบใหม่ รุ่นแก้ไขนี้เป็น 0.6.11 พร้อม Python Desktop 1.3.1 ที่ราก repository
+ไฟล์ D:\AutoPost Manager\AutoPost Manager TH Setup 0.6.10.exe อยู่บนเครื่องผู้ใช้ ไม่ได้อยู่ใน environment นี้ จึงไม่ได้แก้หรือรับรอง executable ที่ติดตั้งอยู่โดยตรง
 การคอมไพล์/ทดสอบไม่ใช่หลักฐานว่าทุกบรรทัดปราศจากบั๊ก หรือฟีเจอร์ทุก release ทำงานครบ
 
 ## บั๊กที่แก้
@@ -22,18 +22,19 @@
 12. Desktop Notification และ progress observer ที่ล้มเหลวไม่เปลี่ยนงานสำเร็จเป็นล้มเหลวหรือขัดจังหวะ worker
 13. Cookie JSON ที่มี null/primitive ถูกปฏิเสธด้วยข้อความตรวจข้อมูลที่ปลอดภัย
 14. Startup failure แสดงข้อความแทน unhandled rejection; ขนาดหน้าต่างคำนวณจาก work area และมี layout สำหรับหน้าจอเล็ก/Windows scaling
-15. Browser fixture tests เลือก Chromium สำหรับ CI ผ่าน environment ได้ โดย default ยังใช้ Chrome ตามเดิม
+15. สำรองฐานข้อมูลก่อน migration 9 เมื่ออัปเกรดจาก schema 7/8 ไม่ใช่สำรองเฉพาะก่อน schema 7; ทดสอบด้วยไฟล์ SQLite จริง ยืนยันทั้งไฟล์ backup และการเปิดใหม่
+16. Browser fixture tests เลือก Chromium สำหรับ CI ผ่าน environment ได้ โดย default ยังใช้ Chrome ตามเดิม
 
 ## หลักฐานการตรวจ
 
 - TypeScript: npm run typecheck ผ่าน
 - Electron build: npm run build ผ่าน (main/preload/renderer)
-- Electron: 28 test files / 85 tests ผ่าน รวม native SQLite integration, queue lifecycle, Discord mock network, shutdown, migration, project import/export, backup encryption และ browser DOM fixtures
+- Electron: 37 test files / 111 tests ผ่าน รวม native SQLite integration, queue lifecycle, Discord mock network, shutdown, migration, project import/export, backup encryption และ browser DOM fixtures
 - Python เดิม: unittest discover ผ่าน 19 tests
 - Python เดิม: check_ui.py ผ่าน account isolation/cache/images+fallback/search/selection/composer/themes/mobile
 - Electron renderer: สลับ 6 หน้าหลักที่ 800/1024/1440px ผ่าน ไม่มี page error หรือ document horizontal overflow ใช้ IPC จำลอง ไม่ใช่ Electron/Windows E2E
 - syntax check Python source ทุกไฟล์ และ node --check สำหรับ UI/metadata JS และ generated Electron main/preload ผ่าน
-- source inventory รอบตรวจ: 118 code files / 6970 lines (รวมซอร์สเดิมและ tests; ไม่นับ dependencies, generated output หรือ binary) เป็นรายการ/hash สำหรับตรวจย้อนกลับ ไม่ใช่คำรับรองว่าอ่านยืนยันพฤติกรรมทุกบรรทัดแล้ว
+- มี source inventory/hash แยกในชุดรายงาน ไม่นับ dependencies, generated output หรือ binary; ไม่ใช่คำรับรองว่าอ่านยืนยันพฤติกรรมทุกบรรทัดแล้ว
 
 คำสั่งตรวจ Electron ใน Linux environment นี้:
 
@@ -56,9 +57,14 @@ Node ใช้ better-sqlite3 native ABI; หลัง build installer ที่
 ## ยังตรวจยืนยันไม่ได้
 
 - ติดตั้ง/อัปเกรด/ถอนติดตั้ง EXE 0.6.10 บน Windows จริง; ยังไม่ได้สร้าง installer ใหม่
-- DPAPI/WebView/Electron native runtime บน Windows และ Windows autostart/Tray จริง
+- Windows autostart/Tray และ DPAPI จริง: ยังต้องตรวจบนเครื่องผู้ใช้; เพิ่ม Windows CI สำหรับ build NSIS และตรวจ packaged Electron ด้วย user data ชั่วคราวและโหมดห้ามโพสต์แล้ว ผล CI ต้องดูจาก run ของ commit นี้
 - ล็อกอิน Facebook จริง, 2FA/checkpoint, selectors ทุก layout, ผลโพสต์/คอมเมนต์/แชร์/ไลก์จริง หรือ permission ของทุกกลุ่ม
 - ไม่ได้ส่ง Discord/Telegram/Facebook จริงระหว่างตรวจ
-- ฟีเจอร์ pending approval detector, group permission discovery และความครบของทุก release ยังคงมีข้อจำกัดตาม IMPLEMENTATION_STATUS.md
+- src/shared/features.ts ของ 0.6.10 ปิด comment/share/like/workflowFollowUp/pendingApprovalDetector/groupPermissionCheck ไว้ทั้งหมด คง flags ตาม upstream; ไม่เปิดฟีเจอร์ที่ยังไม่ได้ตรวจ live เพียงเพื่อให้ดูว่าครบ
+- มีโค้ดและ unit tests ของ pending approval/group permissions แต่ production flags ปิดอยู่ จึงไม่อ้างว่าระบบเหล่านี้ทำงานจริงแล้ว
 
 ไฟล์ซอร์สที่แก้ต้อง rebuild installer ให้ตรงกับ source revision นี้ก่อนจะแสดงผลบนเครื่องผู้ใช้ การอัปเดต GitHub ไม่แก้ไฟล์ EXE ที่ติดตั้งไว้เอง
+
+## Windows installer 0.6.11
+
+เพิ่ม .github/workflows/electron-windows.yml สำหรับ typecheck/tests/build NSIS และตรวจ packaged Electron ใน session-test mode โดยไม่ส่งโพสต์ ไฟล์ติดตั้งจะเป็น artifact ชื่อ AutoPost-Manager-TH-Windows เมื่อ job สำเร็จ ไม่ใช่การอัปเดตไฟล์ D: โดยอัตโนมัติ
