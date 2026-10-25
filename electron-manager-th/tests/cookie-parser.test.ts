@@ -19,3 +19,9 @@ describe("Cookie parser", () => {
     expect(() => parseCookies("c_user=123; xs=secret; c_user=456")).toThrow();
   });
 });
+it("rejects null and primitive JSON rows with a safe validation error",()=>{
+ for(const raw of ['[null]','[1]','["secret-value"]']){
+  expect(()=>parseCookies(raw)).toThrow('รูปแบบ Cookie ไม่ถูกต้อง');
+  try{parseCookies(raw);}catch(error){expect(String(error)).not.toContain('secret-value');}
+ }
+});

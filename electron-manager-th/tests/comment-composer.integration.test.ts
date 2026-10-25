@@ -2,7 +2,11 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { chromium, type BrowserContext } from "playwright-core";
 import { findCommentComposer } from "../electron/automation/comment-composer";
 let context: BrowserContext;
-beforeAll(async () => { const browser = await chromium.launch({ channel: "chrome", headless: true }); context = await browser.newContext(); }, 30000);
+beforeAll(async () => {
+  const browser = await chromium.launch({ ...(process.env.AUTOPOST_TEST_CHROME ? { executablePath: process.env.AUTOPOST_TEST_CHROME } : { channel: "chrome" }), headless: true,
+    args: process.env.AUTOPOST_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : [] });
+  context = await browser.newContext();
+}, 30000);
 afterAll(async () => { await context?.browser()?.close(); });
 it("opens the comment editor of the target post, never a background editor or reply", async () => {
   const page = await context.newPage();

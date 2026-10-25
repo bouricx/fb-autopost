@@ -8,6 +8,8 @@ export interface PublishContext {
   screenshotsDir: string;
   requirePermalink?: boolean;
   onSubmitting?: () => void;
+  /** Upstream explicitly rejected the operation; no remote side effect occurred. */
+  onRejected?: () => void;
 }
 
 export interface PublishResult {

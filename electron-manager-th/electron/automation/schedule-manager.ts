@@ -46,7 +46,11 @@ export class ScheduleManager {
   stop(id: string) {
     this.db.transaction(() => {
       this.db.prepare("UPDATE daily_schedules SET enabled=0 WHERE id=?").run(id);
-      this.db.prepare("UPDATE automation_tasks SET status='cancelled',last_error='หยุดตารางเวลาแล้ว' WHERE status='pending' AND json_extract(payload_json,'$.scheduleId')=?").run(id);
+      this.db.prepare(`WITH RECURSIVE stopped(id) AS (
+        SELECT id FROM automation_tasks WHERE json_extract(payload_json,'$.scheduleId')=?
+        UNION SELECT child.id FROM automation_tasks child JOIN stopped ON child.parent_id=stopped.id
+      ) UPDATE automation_tasks SET status='cancelled',last_error='หยุดตารางเวลาแล้ว'
+        WHERE status IN ('pending','review_required') AND id IN (SELECT id FROM stopped)`).run(id);
     })();
   }
   list(): ScheduleSummary[] {

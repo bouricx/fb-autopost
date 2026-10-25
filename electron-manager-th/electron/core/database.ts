@@ -136,7 +136,10 @@ export class AppDatabase {
     this.db.prepare("UPDATE accounts SET status=?,updated_at=? WHERE id=?").run(status, now(), id);
   }
 
-  deleteAccount(id: string) { this.db.prepare("DELETE FROM accounts WHERE id=?").run(id); }
+  deleteAccount(id: string) {
+    if (this.hasRunningJobs(id)) throw new Error("บัญชีกำลังทำงาน กรุณาหยุดคิวและรอให้งานจบก่อนลบ");
+    this.db.prepare("DELETE FROM accounts WHERE id=?").run(id);
+  }
 
   sessionRecord(id: string) {
     return this.db.prepare(`SELECT encrypted_cookies AS encryptedCookies,headless,session_status AS sessionStatus FROM accounts WHERE id=?`)
@@ -190,7 +193,11 @@ export class AppDatabase {
     return this.destination(id)!;
   }
 
-  deleteDestination(id: string) { this.db.prepare("DELETE FROM destinations WHERE id=?").run(id); }
+  deleteDestination(id: string) {
+    const destination = this.destination(id);
+    if (destination && this.hasRunningJobs(destination.accountId)) throw new Error("บัญชีกำลังทำงาน กรุณารอให้งานจบก่อนลบปลายทาง");
+    this.db.prepare("DELETE FROM destinations WHERE id=?").run(id);
+  }
 
   private jobSelect = `SELECT j.id,j.account_id AS accountId,j.destination_id AS destinationId,
     a.name AS accountName,d.name AS destinationName,c.caption,c.media_json AS mediaJson,
@@ -244,7 +251,8 @@ export class AppDatabase {
 
   claimDue(limit: number): Job[] {
     const claim = this.db.transaction(() => {
-      const rows = this.db.prepare(`SELECT j.id FROM jobs j JOIN accounts a ON a.id=j.account_id WHERE j.status='pending' AND j.next_attempt_at<=?
+      const rows = this.db.prepare(`SELECT j.id FROM jobs j JOIN accounts a ON a.id=j.account_id JOIN destinations d ON d.id=j.destination_id WHERE j.status='pending' AND j.next_attempt_at<=?
+        AND a.status='active' AND d.enabled=1 AND d.account_id=j.account_id
         AND (a.cooldown_until IS NULL OR a.cooldown_until<=?) ORDER BY j.priority DESC,j.next_attempt_at ASC LIMIT ?`).all(now(), now(), limit) as { id: string }[];
       for (const row of rows) this.db.prepare("UPDATE jobs SET status='running',locked_at=?,updated_at=? WHERE id=? AND status='pending'")
         .run(now(), now(), row.id);
@@ -265,7 +273,8 @@ export class AppDatabase {
         .run(publishedUrl || null, now(), job.id);
       if (job.recurrence) {
         const next = new Date(job.runAt);
-        next.setUTCDate(next.getUTCDate() + (job.recurrence === "weekly" ? 7 : 1));
+        const period = (job.recurrence === "weekly" ? 7 : 1) * 86400000;
+        next.setTime(next.getTime() + Math.max(1, Math.floor((Date.now() - next.getTime()) / period) + 1) * period);
         this.db.prepare(`UPDATE jobs SET status='pending',run_at=?,next_attempt_at=?,attempts=0,published_url=NULL,submission_state='not_sent',overdue_approved=0,updated_at=? WHERE id=?`)
           .run(next.toISOString(), next.toISOString(), now(), job.id);
       }

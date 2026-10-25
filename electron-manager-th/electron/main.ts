@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell, protocol, net } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell, protocol, net, screen } from "electron";
 import { pathToFileURL } from "node:url";
 import { readFile, writeFile, stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
@@ -18,6 +18,8 @@ import { AppDatabase } from "./core/database";
 import { SecretVault } from "./core/secrets";
 import { AdapterRegistry } from "./adapters/registry";
 import { QueueEngine } from "./core/queue";
+import { createQuitHandler } from "./core/shutdown";
+import { desktopBounds } from "./core/window-bounds";
 import { AccountManager } from "./accounts/account-manager";
 import { SessionChecker } from "./accounts/session-checker";
 import { parseCookies } from "./accounts/cookie-parser";
@@ -75,10 +77,7 @@ const jobSchema = z.object({
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 860,
-    minWidth: 1040,
-    minHeight: 700,
+    ...desktopBounds(screen.getPrimaryDisplay().workAreaSize),
     backgroundColor: "#080b12",
     title: `AutoPost Manager TH ${app.getVersion()}${sessionTestMode ? " — ทดสอบ Cookie (คิวปิด)" : ""}`,
     autoHideMenuBar: true,
@@ -308,8 +307,9 @@ function registerIpc(profilesDir: string) {
   ipcMain.handle("accounts:login-facebook", async (_event, id: string) => {
     const account = database.accountRecord(z.string().uuid().parse(id));
     if (!account || account.adapterType !== "facebook-browser") throw new Error("ไม่พบบัญชี Facebook");
+    if (queue.status().running || database.hasRunningJobs(account.id)) throw new Error("กรุณาหยุดระบบคิวและรอให้งานจบก่อนเปิดหน้าล็อกอิน");
+    database.setAccountStatus(account.id, "needs_login");
     await adapters.get("facebook-browser").openLogin?.(account);
-    database.setAccountStatus(account.id, "active");
   });
   ipcMain.handle("accounts:discover-groups", async (_event, id: string) => {
     const account = database.accountRecord(z.string().uuid().parse(id));
@@ -397,12 +397,19 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   if (!sessionTestMode) queue.start();
+}).catch(() => {
+  dialog.showErrorBox("เปิด AutoPost ไม่สำเร็จ", "เริ่มระบบหรือเปิดฐานข้อมูลไม่สำเร็จ กรุณาตรวจพื้นที่ว่างและสิทธิ์โฟลเดอร์ข้อมูล แล้วเปิดโปรแกรมใหม่ ห้ามลบฐานข้อมูลเดิม");
+  quitting = true;
+  app.quit();
 });
 
 app.on("activate", () => mainWindow?.show());
 app.on("before-quit", () => { quitting = true; });
-app.on("will-quit", async () => {
+const finishQuit = createQuitHandler(async () => {
   await queue?.stop();
   await adapters?.close();
   database?.close();
+}, () => app.quit(), () => {
+  dialog.showErrorBox("ปิดโปรแกรมไม่สำเร็จ", "ยังปิดคิวหรือฐานข้อมูลไม่สำเร็จ กรุณารอแล้วเลือกออกจากถาดระบบอีกครั้ง");
 });
+app.on("will-quit", event => { void finishQuit(event); });

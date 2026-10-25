@@ -1,0 +1,34 @@
+import { afterEach, expect, it } from "vitest";
+import { AppDatabase } from "../electron/core/database";
+import { ScheduleManager } from "../electron/automation/schedule-manager";
+import { TaskManager } from "../electron/automation/task-manager";
+import { QueueSafety } from "../electron/core/queue-safety";
+const databases: AppDatabase[]=[];
+afterEach(()=>{databases.forEach(db=>db.close());databases.length=0;});
+it("stopping cancels held/pending descendants and prevents follow-ups after a running parent finishes",()=>{
+ const db=new AppDatabase(':memory:');databases.push(db);
+ const account=db.createAccount({name:'fixture',adapterType:'facebook-browser'},null,'/tmp/mock-profile');
+ const schedules=new ScheduleManager(db.db),tasks=new TaskManager(db.db);
+ const id=schedules.create({accountId:account.id,name:'fixture',startDate:'2099-01-01',daily:false,times:['09:00'],payloads:[{targetUrl:'https://www.facebook.com/groups/123',caption:'fixture',likeEnabled:true}]});
+ const parent=tasks.list()[0];
+ db.db.prepare("UPDATE automation_tasks SET status='running' WHERE id=?").run(parent.id);
+ const held=tasks.create(account.id,'like',{targetUrl:'https://www.facebook.com/posts/123'},undefined,null,parent.id);
+ db.db.prepare("UPDATE automation_tasks SET status='review_required' WHERE id=?").run(held);
+ const child=tasks.create(account.id,'like',{targetUrl:'https://www.facebook.com/posts/456'},undefined,null,held);
+ schedules.stop(id);
+ expect(tasks.list().find(t=>t.id===parent.id)?.status).toBe('running');
+ expect(tasks.list().find(t=>t.id===held)?.status).toBe('cancelled');
+ expect(tasks.list().find(t=>t.id===child)?.status).toBe('cancelled');
+ new QueueSafety(db.db).resolve([{kind:'workflow',id:held}],'send');
+ expect(tasks.list().find(t=>t.id===held)?.status).toBe('cancelled');
+ tasks.followUps(parent,'https://www.facebook.com/posts/123');expect(tasks.list()).toHaveLength(3);
+});
+it("recurring legacy posts skip missed intervals and keep only a future recurrence",()=>{
+ const db=new AppDatabase(':memory:');databases.push(db);
+ const account=db.createAccount({name:'fixture',adapterType:'discord-webhook'},null,null);
+ const d=db.createDestination({accountId:account.id,name:'fixture',kind:'discord_webhook',url:'https://discord.com/api/webhooks/123/mock'});
+ const [job]=db.createJobs({accountId:account.id,destinationIds:[d.id],caption:'fixture',media:[],runAt:'2020-01-01T02:00:00.000Z',recurrence:'daily'});
+ db.completeJob(job,db.beginAttempt(job.id,1),'https://example.com');
+ expect(Date.parse(db.job(job.id)!.nextAttemptAt)).toBeGreaterThan(Date.now());
+ expect(db.job(job.id)?.submissionState).toBe('not_sent');
+});

@@ -68,6 +68,10 @@ export class TaskManager {
   recover() { this.db.prepare("UPDATE automation_tasks SET status='uncertain',submission_state='unknown',last_error='โปรแกรมปิดระหว่างทำงาน กรุณาตรวจ Facebook ก่อนเริ่มใหม่' WHERE status='running'").run(); }
   followUps(task: AutomationTask, url: string) {
     this.db.transaction(() => {
+      if (task.payload.scheduleId) {
+        const schedule = this.db.prepare("SELECT enabled FROM daily_schedules WHERE id=?").get(task.payload.scheduleId) as { enabled: number } | undefined;
+        if (!schedule?.enabled) return;
+      }
       const base: ActionPayload = { ...task.payload, targetUrl: url, commentEnabled: false, shareEnabled: false, likeEnabled: false, repeatMinutes: 0 };
       if (task.action === "post") {
         let parentId = task.id;

@@ -20,6 +20,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class QueueEngine {
   private running = false;
   private loopPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private command = 0;
   private readonly activeAccounts = new Set<string>();
   private readonly activeWork = new Set<Promise<void>>();
   private track(work: Promise<void>) {
@@ -37,7 +39,9 @@ export class QueueEngine {
     private readonly progress?: ProgressBus,
   ) {}
 
-  start() {
+  start(): void | Promise<void> {
+    const command = ++this.command;
+    if (this.stopPromise) return this.stopPromise.then(() => { if (command === this.command) return this.start(); });
     if (this.running) return;
     this.running = true;
     this.database.recoverInterruptedJobs();
@@ -45,17 +49,26 @@ export class QueueEngine {
     const held = new QueueSafety(this.database.db).holdOverdue();
     if (held) this.database.log("warn", "queue", `พักคิวเลยเวลา ${held} รายการ รอผู้ใช้เลือกข้าม จัดเวลาใหม่ หรือส่งย้อนหลัง`);
     this.database.log("info", "queue", "เริ่มระบบคิว");
-    this.loopPromise = this.loop();
+    this.loopPromise = this.loop().catch(() => {
+      this.running = false;
+      this.database.log("error", "queue", "ระบบคิวหยุดเพราะข้อผิดพลาด กรุณาตรวจฐานข้อมูลก่อนเริ่มใหม่");
+      this.progress?.publish({ type: "worker.changed", message: "ระบบคิวหยุดเพราะข้อผิดพลาด" });
+    });
     this.progress?.publish({ type: "worker.changed", message: "เริ่มระบบคิว" });
   }
 
-  async stop() {
+  stop(): Promise<void> {
+    this.command++;
+    if (this.stopPromise) return this.stopPromise;
     this.running = false;
-    await this.loopPromise;
-    await Promise.allSettled([...this.activeWork]);
-    this.loopPromise = null;
-    this.database.log("info", "queue", "หยุดระบบคิว");
-    this.progress?.publish({ type: "worker.changed", message: "หยุดระบบคิว" });
+    this.stopPromise = (async () => {
+      await this.loopPromise;
+      await Promise.allSettled([...this.activeWork]);
+      this.loopPromise = null;
+      this.database.log("info", "queue", "หยุดระบบคิว");
+      this.progress?.publish({ type: "worker.changed", message: "หยุดระบบคิว" });
+    })().finally(() => { this.stopPromise = null; });
+    return this.stopPromise;
   }
 
   status() { return { running: this.running }; }
@@ -96,6 +109,7 @@ export class QueueEngine {
 
   private async execute(job: Job) {
     this.activeAccounts.add(job.accountId);
+    let submitted = false;
     const attempt = job.attempts + 1;
     const attemptId = this.database.beginAttempt(job.id, attempt);
     this.progress?.publish({ type: "job.started", accountId: job.accountId, jobId: job.id, destinationId: job.destinationId, percent: 0, message: `กำลังโพสต์ ${job.destinationName}` });
@@ -103,8 +117,8 @@ export class QueueEngine {
     try {
       const account = this.database.accountRecord(job.accountId);
       const destination = this.database.destination(job.destinationId);
-      if (!account || !destination) throw new Error("ไม่พบบัญชีหรือปลายทาง");
-      if (account.status === "paused" || account.status === "needs_login") throw new AuthenticationError("บัญชีถูกพักหรือต้องตรวจสอบ Session ก่อนเริ่มงาน");
+      if (!account || !destination || destination.accountId !== job.accountId || !destination.enabled) throw new Error("ไม่พบบัญชีหรือปลายทางที่เปิดใช้งาน");
+      if (account.status !== "active") throw new AuthenticationError("บัญชีถูกพักหรือต้องตรวจสอบ Session ก่อนเริ่มงาน");
       const adapter = this.adapters.get(account.adapterType);
       const result = await adapter.publish({
         account,
@@ -112,7 +126,8 @@ export class QueueEngine {
         job: { ...job, caption: renderTemplate(job.caption) },
         secret: this.vault.decrypt(account.encryptedSecret),
         screenshotsDir: this.screenshotsDir,
-        onSubmitting: () => { this.database.db.prepare("UPDATE jobs SET submission_state='unknown' WHERE id=?").run(job.id); },
+        onSubmitting: () => { submitted = true; this.database.db.prepare("UPDATE jobs SET submission_state='unknown' WHERE id=?").run(job.id); },
+        onRejected: () => { this.database.db.prepare("UPDATE jobs SET submission_state='not_sent' WHERE id=?").run(job.id); submitted = false; },
       });
       this.database.completeJob(job, attemptId, result.publishedUrl);
       this.database.db.prepare("UPDATE jobs SET submission_state='sent' WHERE id=? AND status='succeeded'").run(job.id);
@@ -120,7 +135,7 @@ export class QueueEngine {
       this.database.log("info", account.name, `โพสต์สำเร็จ: ${destination.name}`, result);
       await new NotificationManager(this.database.db, this.vault).send(account.id, null, null, `${account.name}: โพสต์สำเร็จ ${destination.name}\n${result.publishedUrl || ""}`).catch(() => this.database.log("warn", "notification", "แจ้งเตือนล้มเหลว งานโพสต์ยังคงสำเร็จ"));
       this.progress?.publish({ type: "target.succeeded", accountId: job.accountId, jobId: job.id, destinationId: job.destinationId, percent: 100, message: `โพสต์สำเร็จ ${destination.name}` });
-      if (Notification.isSupported()) new Notification({ title: "AutoPost สำเร็จ", body: `${account.name} → ${destination.name}` }).show();
+      this.notify("AutoPost สำเร็จ", `${account.name} → ${destination.name}`);
     } catch (error) {
       const message = errorMessage(error);
       const screenshot = error && typeof error === "object" && "screenshot" in error ? String(error.screenshot) : undefined;
@@ -128,19 +143,25 @@ export class QueueEngine {
         ? error.retryAfterMs
         : Math.min(60 * 60_000, 60_000 * 2 ** job.attempts) + Math.floor(Math.random() * 15_000);
       const retryAt = new Date(Date.now() + retryMs).toISOString();
-      this.database.failJob(job, attemptId, message, error instanceof RetryableBeforeSubmitError || error instanceof RateLimitError ? retryAt : null, screenshot);
-      if (error instanceof UncertainResultError) this.database.db.prepare("UPDATE jobs SET status='uncertain',submission_state='unknown' WHERE id=?").run(job.id);
+      this.database.failJob(job, attemptId, message, !submitted && (error instanceof RetryableBeforeSubmitError || error instanceof RateLimitError) ? retryAt : null, screenshot);
+      if (submitted || error instanceof UncertainResultError) this.database.db.prepare("UPDATE jobs SET status='uncertain',submission_state='unknown' WHERE id=?").run(job.id);
       if (error instanceof AuthenticationError) this.database.setAccountStatus(job.accountId, "needs_login");
-      if (error instanceof RateLimitError) this.database.setAccountStatus(job.accountId, "rate_limited");
+      if (error instanceof RateLimitError) this.database.db.prepare("UPDATE accounts SET cooldown_until=? WHERE id=?").run(retryAt, job.accountId);
       this.database.log("error", job.accountName, `โพสต์ไม่สำเร็จ: ${message}`, { retryAt, screenshot });
       this.progress?.publish({ type: "target.failed", accountId: job.accountId, jobId: job.id, destinationId: job.destinationId, message });
-      if (Notification.isSupported()) new Notification({ title: "AutoPost ไม่สำเร็จ", body: `${job.destinationName}: ${message}` }).show();
+      this.notify("AutoPost ไม่สำเร็จ", `${job.destinationName}: ${message}`);
     } finally {
       const delay = delayMilliseconds(job.delayMin ?? 30, job.delayMax ?? 90);
-      this.database.db.prepare("UPDATE accounts SET cooldown_until=? WHERE id=?").run(new Date(Date.now() + delay).toISOString(), job.accountId);
+      const until = new Date(Date.now() + delay).toISOString();
+      this.database.db.prepare("UPDATE accounts SET cooldown_until=CASE WHEN cooldown_until>? THEN cooldown_until ELSE ? END WHERE id=?").run(until, until, job.accountId);
       this.activeAccounts.delete(job.accountId);
       this.progress?.publish({ type: "job.completed", accountId: job.accountId, jobId: job.id, destinationId: job.destinationId, message: "จบการทำงานรอบนี้" });
     }
+  }
+
+  private notify(title: string, body: string) {
+    try { if (Notification.isSupported()) new Notification({ title, body }).show(); }
+    catch { this.database.log("warn", "notification", "แจ้งเตือน Desktop ไม่สำเร็จ ผลงานยังคงเดิม"); }
   }
 
   private async executeTask(task: AutomationTask, tasks: TaskManager) {

@@ -11,6 +11,7 @@ export interface SessionCookie {
 export interface CookieCandidate { userId: string; format: "json" | "netscape" | "raw"; cookies: SessionCookie[] }
 
 function normalize(input: Record<string, unknown>): SessionCookie {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("รูปแบบ Cookie ไม่ถูกต้อง");
   const domain = String(input.domain || ".facebook.com").toLowerCase();
   if (!/^(\.)?([a-z0-9-]+\.)*facebook\.com$/.test(domain)) throw new Error("รองรับเฉพาะ Cookie ของ Facebook");
   const same = String(input.sameSite || "lax").toLowerCase();
