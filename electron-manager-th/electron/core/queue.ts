@@ -1,3 +1,4 @@
+import { MessageProfiles } from "../automation/message-profiles";
 import { Notification } from "electron";
 import type { Job } from "../../src/shared/types";
 import { AdapterRegistry } from "../adapters/registry";
@@ -90,6 +91,8 @@ export class QueueEngine {
       }
       heartbeat = Date.now();
       new ScheduleManager(this.database.db).materialize();
+      await new MessageProfiles(this.database.db).materialize();
+      if (!this.running) break;
       const available = Math.max(0, this.concurrency - this.activeAccounts.size);
       if (available) {
         const candidates = this.database.claimDue(available * 3);
@@ -207,7 +210,7 @@ export class QueueEngine {
       if (task.action !== "post") assertActionEnabled(task.action);
       if (task.action === "post") {
         const destination = this.database.listDestinations(account.id).find(row => row.url === task.payload.targetUrl);
-        if (!destination) throw new ActionBlockedError("ไม่พบปลายทางโพสต์ในบัญชีนี้");
+        if (!destination || !destination.enabled) throw new ActionBlockedError("ไม่พบปลายทางโพสต์ในบัญชีนี้");
         const job: Job = { id: task.id, accountId: account.id, destinationId: destination.id, accountName: account.name, destinationName: destination.name,
           caption: renderTemplate(task.payload.caption), media: task.payload.media, runAt: task.scheduledAt, recurrence: null, priority: 0,
           status: "running", attempts: task.attempts, maxAttempts: 1, nextAttemptAt: task.scheduledAt, lastError: null, publishedUrl: null };

@@ -115,6 +115,13 @@ export interface CreateJobInput {
 }
 
 export interface AppApi {
+  listMessageProfiles(): Promise<import("./message-profiles").MessageProfile[]>;
+  saveMessageProfile(id: string | null, input: import("./message-profiles").MessageProfileInput): Promise<string>;
+  deleteMessageProfile(id: string): Promise<void>;
+  listProfileRuns(): Promise<import("./message-profiles").ProfileRun[]>;
+  createProfileRun(input: import("./message-profiles").ProfileRunInput): Promise<string>;
+  stopProfileRun(id: string): Promise<void>;
+  chooseImageFolder(): Promise<{ folder: string; paths: string[] } | null>;
   listOverdue(): Promise<import("../../electron/core/queue-safety").OverdueItem[]>;
   resolveOverdue(input: { items: { kind: "post" | "workflow"; id: string }[]; decision: "skip" | "reschedule" | "send"; at?: string }): Promise<boolean>;
   listSchedules(): Promise<import("../../electron/automation/schedule-manager").ScheduleSummary[]>;
@@ -124,7 +131,7 @@ export interface AppApi {
   deleteQueueItem(kind: "post" | "workflow", id: string): Promise<boolean>;
   cancelPendingQueueItems(items: { kind: "post" | "workflow"; id: string }[]): Promise<number | false>;
   deletePendingQueueItems(input: { items: { kind: "post" | "workflow"; id: string }[]; scheduleId?: string }): Promise<number | false>;
-  startActionWorkflow(input: { accountId: string; workflows: { action: "comment" | "share" | "like"; payload: unknown }[][] }): Promise<string[]>;
+  startActionWorkflow(input: { accountId: string; scheduledAt?: string; workflows: { action: "comment" | "share" | "like"; payload: unknown }[][] }): Promise<string[]>;
   startProjectPosts(input: { settings: import("../../electron/projects/project-manager").WorkspaceSettings; scheduledAt: string }): Promise<string[]>;
   listNotificationChannels(): Promise<{ id: string; name: string; type: string; accountId: string | null; projectId: string | null; enabled: number }[]>;
   probeNotificationChannel(id: string): Promise<string>;

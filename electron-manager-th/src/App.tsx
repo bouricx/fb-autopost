@@ -1,3 +1,5 @@
+import { MessageProfiles } from "./components/MessageProfiles";
+import { ActionWorkspace } from "./components/ActionWorkspace";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ProjectToolbar } from "./components/ProjectToolbar";
 import { MediaPreview } from "./components/MediaPreview";
@@ -10,7 +12,7 @@ import { ScheduleStatus } from "./components/ScheduleStatus";
 import { OverdueReview } from "./components/OverdueReview";
 import type { WorkspaceSettings, AccountWorkspace } from "../electron/projects/project-manager";
 import {
-  Activity, CalendarClock, CircleGauge, FileClock, LogOut, Plus, RefreshCw,
+  Copy as CopyIcon, Activity, CalendarClock, CircleGauge, FileClock, LogOut, Plus, RefreshCw,
   Send, Settings, Trash2, Users, Wifi, WifiOff, X,
 } from "lucide-react";
 import type { Account, AdapterType, Dashboard, Destination, DestinationKind, FacebookGroupInfo, Job, LogEntry } from "./shared/types";
@@ -18,8 +20,10 @@ import { FEATURES } from "./shared/features";
 import "./styles/accounts.css";
 import "./styles/group-picker.css";
 
-type Page = "dashboard" | "accounts" | "compose" | "queue" | "logs" | "settings";
+type Page = "dashboard" | "accounts" | "compose" | "queue" | "logs" | "settings" | "profiles" | "actions";
 const pageTitle: Record<Page, [string, string]> = {
+  profiles: ["โปรไฟล์ข้อความ", "จัดเนื้อหาเป็นชุด ใช้ร่วมกันหลายบัญชีและวนตามเวลา"],
+  actions: ["แชร์ · คอมเมนต์ · ถูกใจ", "เลือกขั้นตอนและเป้าหมาย พร้อมติดตามผลแต่ละรายการ"],
   dashboard: ["ภาพรวม", "สถานะงานและสถิติการโพสต์ล่าสุด"],
   accounts: ["บัญชีและปลายทาง", "จัดการ Facebook, Discord และตำแหน่งที่จะโพสต์"],
   compose: ["สร้างและตั้งเวลา", "สร้างโพสต์และจัดคิวอย่างปลอดภัย พร้อมตรวจสอบ permalink"],
@@ -96,6 +100,8 @@ export function App() {
         <Nav active={page === "dashboard"} icon={<CircleGauge/>} label="ภาพรวมและสถานะ" onClick={() => setPage("dashboard")}/>
         <Nav active={page === "accounts"} icon={<Users/>} label="1. บัญชีและปลายทาง" onClick={() => setPage("accounts")}/>
         <Nav active={page === "compose"} icon={<CalendarClock/>} label="2. สร้างงานและตั้งเวลา" onClick={() => setPage("compose")}/>
+        <Nav active={page === "profiles"} icon={<CopyIcon/>} label="โปรไฟล์ข้อความ" onClick={() => setPage("profiles")}/>
+        <Nav active={page === "actions"} icon={<Send/>} label="แชร์ / คอมเมนต์ / ถูกใจ" onClick={() => setPage("actions")}/>
         <Nav active={page === "queue"} icon={<FileClock/>} label="3. คิวและผลการทำงาน" badge={dashboard?.pending} onClick={() => setPage("queue")}/>
         <Nav active={page === "logs"} icon={<Activity/>} label="Log การทำงาน" onClick={() => setPage("logs")}/>
         <Nav active={page === "settings"} icon={<Settings/>} label="ตั้งค่า" onClick={() => setPage("settings")}/>
@@ -124,6 +130,8 @@ export function App() {
           return <div key={`${event.at}-${index}`} style={{ borderLeft: `3px solid hsl(${hue} 75% 65%)`, paddingLeft: 10 }}><small>{account?.name || "ระบบ"}</small><span> {event.message}</span>{event.percent !== undefined && <progress max={100} value={event.percent}/>}</div>;
         })}</div>}
         {page === "dashboard" && <DashboardView data={dashboard} jobs={jobs} logs={logs} worker={worker}/>}
+        {page === "profiles" && <MessageProfiles accounts={accounts} destinations={destinations}/>}
+        {page === "actions" && <ActionWorkspace action="share" accounts={accounts} destinations={destinations}/>}
         {page === "accounts" && <AccountsView accounts={accounts} destinations={destinations} mutate={mutate}/>}
          <div className="composer-host" hidden={page !== "compose"}><Composer accounts={accounts} destinations={destinations} mutate={mutate}/></div>
          {page === "queue" && <UnifiedQueue accounts={accounts}/>}
@@ -167,6 +175,7 @@ function AccountsView({ accounts, destinations, mutate }: { accounts: Account[];
       {accounts.filter(a => a.id === selected && a.platform === "facebook").map(account => <div className="account-session-details" key={account.id}>
          <div className="session-summary"><b>{account.name}</b><span>ชื่อ Facebook: {account.facebookName || "ยังยืนยันไม่ได้"}</span><span>ประเภท: {account.facebookActorType === "profile" ? "บัญชีส่วนตัว" : account.facebookActorType === "page" ? "เพจ" : "ยังไม่ยืนยัน"}</span><span>สถานะ: {({ online: "ออนไลน์", expired: "หมดอายุ", restricted: "ถูกจำกัด", checkpoint: "ต้องยืนยันตัวตน", disabled: "ถูกปิดใช้งาน", unknown: "ยังไม่ทราบ" } as Record<string, string>)[account.sessionStatus || "unknown"]} · ตรวจล่าสุด {account.lastCheckedAt ? formatThaiTime(account.lastCheckedAt) : "ยังไม่เคยตรวจ"} · {account.status === "paused" ? "บัญชีถูกพักการโพสต์" : account.statusMessage}</span>{account.status === "paused" && <span className="session-paused-warning">บัญชีถูกพักการโพสต์ กรุณาตรวจเครือข่ายและ Session ก่อนตัดสินใจเริ่มงานใหม่</span>}</div>
         {!editingName ? <button className="secondary small session-rename" onClick={() => { setAccountName(account.name); setEditingName(true); }}>เปลี่ยนชื่อที่แสดงในโปรแกรม</button> : <form className="session-rename-form" onSubmit={e => { e.preventDefault(); void mutate(() => window.autopost.renameAccount(account.id, accountName)).then(ok => { if (ok) setEditingName(false); }); }}><label>ชื่อบัญชี<input value={accountName} maxLength={80} required onChange={e => setAccountName(e.target.value)}/></label><button className="primary small" disabled={!accountName.trim()}>บันทึก</button><button type="button" className="secondary small" onClick={() => setEditingName(false)}>ยกเลิก</button></form>}
+        <details className="account-profile-settings"><summary>โปรไฟล์ข้อความและแชร์คู่กับงานโพสต์</summary><MessageProfiles accounts={accounts} destinations={destinations} accountOnly={account.id}/></details>
         <div className="session-action-grid"><button className="primary" onClick={() => void mutate(() => window.autopost.checkSession(account.id))}>ตรวจสอบสถานะ</button><button className="secondary" onClick={() => void mutate(() => window.autopost.loginAndCheckFacebook(account.id))}>เข้าสู่ระบบด้วย Chrome</button></div>
         <details className="session-more"><summary>จัดการ Session และข้อมูลสำรอง</summary><div className="session-action-grid"><button className="secondary" onClick={() => void mutate(() => window.autopost.copyCookie(account.id))}>คัดลอก Cookie (ล้างใน 45 วินาที)</button><button className="secondary" onClick={() => setBackup("export")}>สำรอง Session</button><button className="secondary" onClick={() => setBackup("import")}>กู้คืน Session</button><label><input type="checkbox" checked={!!account.headless} onChange={e => void mutate(() => window.autopost.setHeadless(account.id, e.target.checked))}/> ตรวจแบบไม่แสดงหน้าต่าง</label></div><small>หยุดคิวก่อนตรวจสอบหรือลบ Session</small><button className="danger" onClick={() => void mutate(() => window.autopost.deleteSession(account.id))}>ลบ Session และข้อมูลบัญชี</button></details>
       </div>)}
@@ -437,7 +446,7 @@ function Composer({ accounts, destinations, mutate }: { accounts: Account[]; des
       <p role="status">{validateDelay(projectSettings.delayMin, projectSettings.delayMax) || (projectSettings.delayMin === projectSettings.delayMax ? `พักคงที่ ${projectSettings.delayMin} วินาที` : `สุ่มพัก ${projectSettings.delayMin}–${projectSettings.delayMax} วินาที`)}</p><button type="button" className="primary" disabled={!!validateDelay(projectSettings.delayMin, projectSettings.delayMax)} onClick={() => setSettingsPanel(null)}>ใช้ดีเลย์นี้</button>
     </div></Modal>}
     <div className="compose-commandbar"><span><b>ตั้งค่างานโพสต์</b><small>โพสต์ใช้ข้อความและสื่อจากช่องหลักเท่านั้น</small></span><button type="button" className="secondary small" onClick={() => setSettingsPanel("project")}>โปรเจกต์ / บันทึกชุดงาน</button></div>
-    <p className="form-hint compose-feature-note" role="note">ฟีเจอร์คอมเมนต์ / แชร์ / ไลค์ ยังปิดใช้งานอยู่ สามารถเปิดได้ภายหลัง</p>
+    <p className="form-hint compose-feature-note" role="note">ตั้งเวลาจากหน้าสร้างงาน หรือใช้โปรไฟล์ข้อความเพื่อกำหนดเนื้อหาแต่ละกลุ่ม · ขั้นตอนต่อเนื่องเริ่มเมื่อยืนยันโพสต์ถาวรแล้ว</p>
     <div hidden={settingsPanel !== "project"} className="project-modal-host"><Modal title="โปรเจกต์ / บันทึกและโหลดชุดงาน" close={() => setSettingsPanel(null)}><ProjectToolbar settings={projectSettings} load={loadProject}/></Modal></div>
     <div className="panel compose-main"><div className="panel-title"><div><h2>1. ข้อความโพสต์หลักและสื่อ</h2><p title={accounts.find(account => account.id === accountId)?.name}>ใช้โพสต์ทุกกลุ่มที่เลือก · ไม่ถูกแทนที่ด้วยความคิดเห็น/แชร์</p></div><span className="counter">{caption.length} ตัวอักษร</span></div>
     <textarea aria-label="ข้อความโพสต์หลัก" rows={10} value={caption} onChange={e => setCaption(e.target.value)} placeholder="เขียนข้อความโพสต์หลักที่นี่ ใช้ข้อความนี้กับทุกกลุ่มที่เลือก"/>

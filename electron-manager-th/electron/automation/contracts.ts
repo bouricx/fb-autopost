@@ -4,6 +4,7 @@ export const facebookUrl = z.string().url().max(2048).refine(value => {
   return url.protocol === "https:" && ["www.facebook.com", "facebook.com", "m.facebook.com"].includes(url.hostname) && !url.username && !url.password;
 }, "ต้องใช้ URL Facebook แบบ HTTPS");
 export const actionPayloadSchema = z.object({
+  profileRunId: z.string().uuid().nullable().default(null),
   scheduleId: z.string().uuid().nullable().default(null), roundId: z.string().uuid().nullable().default(null),
   targetUrl: facebookUrl, sourceUrl: facebookUrl.optional(), groupName: z.string().max(200).optional(),
   caption: z.string().max(10000).default(""), media: z.array(z.string().max(4096)).max(10).default([]),

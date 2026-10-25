@@ -15,6 +15,9 @@ export function ActionWorkspace({ action, accounts, destinations }: { action: "c
   const [groups, setGroups] = useState<string[]>([]);
   const [headless, setHeadless] = useState("account");
   const [repeat, setRepeat] = useState(0);
+  const [scheduledAt, setScheduledAt] = useState(() => new Date(Date.now() + 300000 + 7 * 3600000).toISOString().slice(0,16));
+  const [delayMin, setDelayMin] = useState(30);
+  const [delayMax, setDelayMax] = useState(90);
   const [busy, setBusy] = useState(false);
   const [channels, setChannels] = useState<Awaited<ReturnType<typeof window.autopost.listNotificationChannels>>>([]);
   const [channelId, setChannelId] = useState("");
@@ -38,7 +41,7 @@ export function ActionWorkspace({ action, accounts, destinations }: { action: "c
       if (enabled.share && !groups.length) throw new Error("กรุณาเลือกกลุ่มสำหรับแชร์");
       const missing = await window.autopost.previewMedia(enabled.comment ? media : []);
       if (missing.some(item => item.missing)) throw new Error("ไม่พบไฟล์สื่อ");
-      const base = { headless: headless === "account" ? null : headless === "headless", channelId: channelId || null };
+      const base = { headless: headless === "account" ? null : headless === "headless", channelId: channelId || null, delayMin, delayMax };
       const workflows = targets.map(targetUrl => {
         const steps: { action: "comment" | "share" | "like"; payload: unknown }[] = [];
         if (enabled.comment) steps.push({ action: "comment", payload: { ...base, targetUrl, caption, media } });
@@ -48,21 +51,23 @@ export function ActionWorkspace({ action, accounts, destinations }: { action: "c
         if (enabled.like) steps.push({ action: "like", payload: { ...base, targetUrl, caption: "", media: [] } });
         return steps;
       });
-      const ids = await window.autopost.startActionWorkflow({ accountId, workflows });
+      const independent = workflows.flatMap(steps => steps.map(step => [step]));
+      const ids = await window.autopost.startActionWorkflow({ accountId, workflows: independent, scheduledAt: new Date(`${scheduledAt}:00+07:00`).toISOString() });
       setMessage(`เพิ่มคิว ${ids.length} รายการแล้ว เปิดระบบคิวในหน้าตั้งค่าเพื่อเริ่มทำงาน`);
       setTasks(await window.autopost.listActions());
     } catch (error) { setMessage(error instanceof Error ? error.message : "เริ่มงานไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
-  return <div className="panel fields"><h2>ความคิดเห็น · แชร์ · ถูกใจ</h2><p>เปิดเฉพาะขั้นตอนที่ต้องการ แล้วกดเริ่มครั้งเดียว ระบบทำตามลำดับ ความคิดเห็น → แชร์เข้ากลุ่ม → ถูกใจ ต่อโพสต์ หากขั้นตอนก่อนหน้าไม่สำเร็จจะหยุดขั้นตอนถัดไป</p>
+  return <div className="panel fields"><h2>ความคิดเห็น · แชร์ · ถูกใจ</h2><p>เปิดเฉพาะขั้นตอนที่ต้องการ แล้วกดเริ่มครั้งเดียว แต่ละเป้าหมายมีคิวแยกกัน กลุ่มที่รออนุมัติไม่ขวางกลุ่มถัดไป งานที่ยืนยันผลไม่ได้จะไม่ส่งซ้ำอัตโนมัติ</p>
     <div className="action-toggles">{(["comment", "share", "like"] as const).map(kind => <label className={enabled[kind] ? "enabled" : ""} key={kind}><input type="checkbox" checked={enabled[kind]} disabled={busy} onChange={e => setEnabled(current => ({ ...current, [kind]: e.target.checked }))}/><b>{labels[kind]}</b><small>{enabled[kind] ? "เปิดใช้งาน" : "ปิดใช้งาน"}</small></label>)}</div>
     <label>บัญชี<select value={accountId} onChange={e => { setAccountId(e.target.value); setGroups([]); }}>{accounts.filter(account => account.platform === "facebook").map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
     <label>URL โพสต์ (หนึ่งรายการต่อบรรทัด)<textarea rows={5} value={urls} onChange={e => setUrls(e.target.value)}/></label>
     {enabled.comment && <div className="panel fields"><h3>ตั้งค่าความคิดเห็น</h3><label>ข้อความความคิดเห็น<textarea rows={3} value={caption} onChange={e => setCaption(e.target.value)}/></label><button className="secondary" onClick={() => void window.autopost.chooseMedia().then(paths => setMedia(paths.slice(0, 1))).catch(() => setMessage("เลือกไฟล์ไม่สำเร็จ"))}>เลือกรูปความคิดเห็น (1 ไฟล์)</button><MediaPreview paths={media}/></div>}
     {enabled.share && <div className="panel fields"><h3>ตั้งค่าการแชร์</h3><label>ข้อความแชร์<textarea rows={3} value={shareCaption} onChange={e => setShareCaption(e.target.value)}/></label><p>แชร์แบบ Facebook ใช้รูปต้นฉบับ เปลี่ยนรูปให้ใช้หน้าสร้างโพสต์แทน</p><div className="checks">{destinations.filter(group => group.accountId === accountId && group.kind === "facebook_group").map(group => <label key={group.id}><input type="checkbox" checked={groups.includes(group.id)} onChange={e => setGroups(current => e.target.checked ? [...current, group.id] : current.filter(id => id !== group.id))}/><span>{group.name}</span></label>)}</div><label>แชร์ซ้ำทุก (นาที, 0 = ไม่ซ้ำ)<input type="number" min={0} max={525600} value={repeat} onChange={e => setRepeat(Number(e.target.value))}/></label></div>}
+    <div className="profile-form-grid"><label>เริ่มเมื่อ (เวลาไทย UTC+7)<input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)}/></label><label>พักระหว่างเป้าหมายต่ำสุด (วินาที)<input type="number" min={0} value={delayMin} onChange={e => setDelayMin(Number(e.target.value))}/></label><label>พักสูงสุด (วินาที)<input type="number" min={delayMin} value={delayMax} onChange={e => setDelayMax(Number(e.target.value))}/></label></div>
     <label>Chrome<select value={headless} onChange={e => setHeadless(e.target.value)}><option value="account">ใช้ค่าบัญชี</option><option value="headless">ไม่แสดงหน้าต่าง</option><option value="headed">แสดงหน้าต่าง</option></select></label>
     <label>ช่องแจ้งเตือนเฉพาะงาน<select value={channelId} onChange={e => setChannelId(e.target.value)}><option value="">ใช้ค่าบัญชี / โปรเจกต์</option>{channels.map(channel => <option key={channel.id} value={channel.id}>{channel.name}</option>)}</select></label>
     <button className="primary" disabled={busy || !accountId || !Object.values(enabled).some(Boolean)} onClick={() => void start()}>{busy ? "กำลังเพิ่มคิว…" : "เริ่มการทำงานที่เปิดไว้"}</button>{message && <p role="status">{message}</p>}
-    <h3>ประวัติและคิวรวม</h3>{!tasks.length && <p>ยังไม่มีงาน</p>}{tasks.map(task => <div key={task.id}><b>{task.action === "post" ? "โพสต์" : labels[task.action]} · {({ pending: "รอทำงาน", running: "กำลังทำงาน", succeeded: "สำเร็จ", failed: "ล้มเหลว", uncertain: "ต้องตรวจผลเอง", cancelled: "ยกเลิกแล้ว" } as Record<string, string>)[task.status] || task.status}</b> {task.payload.targetUrl}<small>{task.lastError}</small>{task.status === "pending" && <button className="secondary small" onClick={() => void window.autopost.cancelAction(task.id).then(() => window.autopost.listActions()).then(setTasks).catch(() => setMessage("ยกเลิกไม่สำเร็จ"))}>ยกเลิก</button>}</div>)}
+    <h3>ประวัติและคิวรวม</h3>{!tasks.length && <p>ยังไม่มีงาน</p>}{tasks.map(task => <div key={task.id}><b>{task.action === "post" ? "โพสต์" : labels[task.action]} · {({ pending_approval: "รออนุมัติกลุ่ม — ส่งแล้ว", review_required: "เลยเวลา รอตรวจสอบ", pending: "รอทำงาน", running: "กำลังทำงาน", succeeded: "สำเร็จ", failed: "ล้มเหลว", uncertain: "ต้องตรวจผลเอง", cancelled: "ยกเลิกแล้ว" } as Record<string, string>)[task.status] || task.status}</b> {task.payload.targetUrl}<small>{task.lastError}</small>{task.status === "pending" && <button className="secondary small" onClick={() => void window.autopost.cancelAction(task.id).then(() => window.autopost.listActions()).then(setTasks).catch(() => setMessage("ยกเลิกไม่สำเร็จ"))}>ยกเลิก</button>}</div>)}
   </div>;
 }

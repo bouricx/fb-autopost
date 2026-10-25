@@ -25,18 +25,29 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.getByRole('heading', { name: 'ภาพรวม', exact: true }).waitFor();
   console.log('Renderer ready');
-  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.6.11');
+  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.7.0');
   assert.deepEqual(await page.evaluate(() => window.autopost.listAccounts()), []);
   assert.equal((await page.evaluate(() => window.autopost.workerStatus())).running, false);
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(800, 700));
-  for (const name of ['ภาพรวมและสถานะ', '1. บัญชีและปลายทาง', '2. สร้างงานและตั้งเวลา', '3. คิวและผลการทำงาน', 'Log การทำงาน', 'ตั้งค่า']) {
+  for (const name of ['ภาพรวมและสถานะ', '1. บัญชีและปลายทาง', '2. สร้างงานและตั้งเวลา', 'โปรไฟล์ข้อความ', 'แชร์ / คอมเมนต์ / ถูกใจ', '3. คิวและผลการทำงาน', 'Log การทำงาน', 'ตั้งค่า']) {
     console.log('Checking view:', name);
     await page.locator('nav').getByRole('button', { name, exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
-  await page.screenshot({ path: join(output, 'desktop-settings.png'), fullPage: true });
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 1000));
+  await page.locator('nav').getByRole('button', {name:'โปรไฟล์ข้อความ',exact:true}).click();
+  const sets=page.locator('.profile-set');
+  for (const [index,id] of ['123','456'].entries()) {
+    await sets.nth(index).locator('textarea').nth(0).fill(`https://www.facebook.com/groups/${id}/`);
+    await sets.nth(index).locator('textarea').nth(1).fill(`ข้อความชุด ${index+1}`);
+  }
+  await page.keyboard.press('Control+s');
+  await page.getByRole('status').filter({hasText:'บันทึกแล้ว ทุกบัญชี'}).waitFor();
+  assert.equal((await page.evaluate(()=>window.autopost.listMessageProfiles()))[0].sets.length,2);
+  await page.locator('.content').evaluate(node=>node.scrollTop=0);
+  await page.screenshot({ path: join(output, 'desktop-profiles.png'), fullPage: true });
   assert.deepEqual(errors, []);
-  console.log('Packaged Windows desktop passed: isolated data, session-test mode, queue disabled, six navigation views, small window. No social actions sent.');
+  console.log('Packaged Windows desktop passed: isolated data, session-test mode, queue disabled, eight navigation views and native profile save IPC, small window. No social actions sent.');
 } finally {
   try {
     console.log('Closing desktop');

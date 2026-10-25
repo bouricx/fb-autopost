@@ -75,6 +75,10 @@ export class TaskManager {
   followUps(task: AutomationTask, url: string) {
     if (!this.features.workflowFollowUp) return;
     this.db.transaction(() => {
+      if (task.payload.profileRunId) {
+        const run = this.db.prepare("SELECT enabled FROM profile_runs WHERE id=?").get(task.payload.profileRunId) as { enabled: number } | undefined;
+        if (!run?.enabled) return;
+      }
       if (task.payload.scheduleId) {
         const schedule = this.db.prepare("SELECT enabled FROM daily_schedules WHERE id=?").get(task.payload.scheduleId) as { enabled: number } | undefined;
         if (!schedule?.enabled) return;
@@ -85,8 +89,8 @@ export class TaskManager {
         if (task.payload.commentEnabled) for (const [index, template] of task.payload.commentTemplates.entries()) {
           parentId = this.create(task.accountId, "comment", { ...base, caption: template.text, media: template.image ? [template.image] : [] }, undefined, task.projectId, parentId, idempotencyKey([task.id, "comment", index]));
         }
-        if (task.payload.shareEnabled) for (const [index, target] of task.payload.shareTargets.entries()) parentId = this.create(task.accountId, "share", { ...base, sourceUrl: url, targetUrl: target.url, groupName: target.name, caption: target.caption, media: target.media, repeatMinutes: task.payload.repeatMinutes }, undefined, task.projectId, parentId, idempotencyKey([task.id, "share", index]));
-        if (task.payload.likeEnabled) this.create(task.accountId, "like", { ...base, caption: "", media: [] }, undefined, task.projectId, parentId, idempotencyKey([task.id, "like"]));
+        if (task.payload.shareEnabled) for (const [index, target] of task.payload.shareTargets.entries()) this.create(task.accountId, "share", { ...base, sourceUrl: url, targetUrl: target.url, groupName: target.name, caption: target.caption, media: target.media, repeatMinutes: task.payload.repeatMinutes }, undefined, task.projectId, task.id, idempotencyKey([task.id, "share", index]));
+        if (task.payload.likeEnabled) this.create(task.accountId, "like", { ...base, caption: "", media: [] }, undefined, task.projectId, task.id, idempotencyKey([task.id, "like"]));
       }
       if (task.action === "share" && task.payload.repeatMinutes > 0) this.create(task.accountId, "share", task.payload,
         new Date(Date.now() + task.payload.repeatMinutes * 60000).toISOString(), task.projectId, task.id, idempotencyKey([task.id, "repeat-share"]));

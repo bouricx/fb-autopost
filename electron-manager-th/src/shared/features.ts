@@ -1,9 +1,9 @@
 export const FEATURES = {
-  comment: false,
-  share: false,
-  like: false,
-  workflowFollowUp: false,
-  pendingApprovalDetector: false,
+  comment: true,
+  share: true,
+  like: true,
+  workflowFollowUp: true,
+  pendingApprovalDetector: true,
   groupPermissionCheck: false,
 } as const;
 

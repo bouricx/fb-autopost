@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell, protocol, net, screen } from "electron";
 import { pathToFileURL } from "node:url";
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { ProjectManager, workspaceSchema } from "./projects/project-manager";
+import { MessageProfiles } from "./automation/message-profiles";
 import { TaskManager } from "./automation/task-manager";
 import { QueueSafety } from "./core/queue-safety";
 import { ScheduleManager } from "./automation/schedule-manager";
@@ -127,6 +128,29 @@ function registerIpc(profilesDir: string) {
     safety.resolve(data.items, data.decision, data.at);
     progressBus.publish({ type: "worker.changed", message: "อัปเดตคิวเลยเวลาตามการตัดสินใจแล้ว" }); return true;
   });
+  const profiles = new MessageProfiles(database.db);
+  ipcMain.handle("profiles:list", () => profiles.list());
+  ipcMain.handle("profiles:save", (_event, id: unknown, input: unknown) => profiles.save(z.string().uuid().nullable().parse(id), input));
+  ipcMain.handle("profiles:delete", (_event, id: unknown) => profiles.remove(z.string().uuid().parse(id)));
+  ipcMain.handle("profiles:runs", () => profiles.runs());
+  ipcMain.handle("profiles:start", (_event, input: unknown) => {
+    if (sessionTestMode) throw new Error("โหมดทดสอบไม่อนุญาตสร้างงาน Facebook");
+    const id = profiles.createRun(input);
+    progressBus.publish({ type: "worker.changed", message: "สร้างตารางโปรไฟล์แล้ว งานจะเริ่มเมื่อถึงเวลาและเปิดระบบคิว" }); return id;
+  });
+  ipcMain.handle("profiles:stop", (_event, id: unknown) => {
+    profiles.stop(z.string().uuid().parse(id));
+    progressBus.publish({ type: "worker.changed", message: "หยุดตารางโปรไฟล์และคิวที่ยังไม่ส่งแล้ว" });
+  });
+  ipcMain.handle("media:choose-image-folder", async () => {
+    const choice = await dialog.showOpenDialog({ title: "เลือกโฟลเดอร์รูป แนบทุกภาพ (สูงสุด 10 ภาพ)", properties: ["openDirectory"] });
+    if (choice.canceled) return null;
+    const entries = await readdir(choice.filePaths[0], { withFileTypes: true });
+    const paths = entries.filter(item => item.isFile() && /\.(jpe?g|png|webp|gif)$/i.test(item.name)).sort((a,b) => a.name.localeCompare(b.name)).map(item => join(choice.filePaths[0], item.name));
+    if (!paths.length) throw new Error("ไม่พบรูปในโฟลเดอร์");
+    if (paths.length > 10) throw new Error(`พบ ${paths.length} รูป Facebook รองรับไม่เกิน 10 รูปต่อโพสต์ กรุณาแยกโฟลเดอร์`);
+    return { folder: choice.filePaths[0], paths };
+  });
   const schedules = new ScheduleManager(database.db);
   ipcMain.handle("schedules:list", () => schedules.list());
   ipcMain.handle("schedules:create", (_event, input: unknown) => {
@@ -215,14 +239,14 @@ function registerIpc(profilesDir: string) {
   ipcMain.handle("actions:start-workflow", (_event, raw: unknown) => {
     if (!FEATURES.workflowFollowUp) throw new Error("ฟีเจอร์ขั้นตอนต่อเนื่องยังปิดใช้งานอยู่ สามารถเปิดได้ภายหลัง");
     if (sessionTestMode) throw new Error("โหมดทดสอบ Cookie ไม่อนุญาต action บน Facebook");
-    const data = z.object({ accountId: z.string().uuid(), workflows: z.array(z.array(z.object({
+    const data = z.object({ accountId: z.string().uuid(), scheduledAt: z.string().datetime().optional(), workflows: z.array(z.array(z.object({
       action: z.enum(["comment", "share", "like"]), payload: actionPayloadSchema,
-    })).min(1).max(2002)).min(1).max(100) }).parse(raw);
+    })).min(1).max(2002)).min(1).max(2000) }).parse(raw);
     if (data.workflows.reduce((total, steps) => total + steps.length, 0) > 2000) throw new Error("สร้างได้ไม่เกิน 2000 ขั้นตอนต่อครั้ง");
     const ids = database.db.transaction(() => data.workflows.flatMap(steps => {
       let parent: string | null = null;
       return steps.map(step => {
-        const id = tasks.create(data.accountId, step.action, step.payload, undefined, null, parent);
+        const id = tasks.create(data.accountId, step.action, step.payload, data.scheduledAt, null, parent);
         parent = id; return id;
       });
     }))();

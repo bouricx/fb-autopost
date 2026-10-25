@@ -1,3 +1,4 @@
+import { MessageProfiles } from "../automation/message-profiles";
 import Database from "better-sqlite3";
 import { migrateProjectWorkspaces } from "./migrations/003-project-workspaces";
 import { migrateAutomationTasks } from "./migrations/004-automation-tasks";
@@ -38,6 +39,7 @@ export class AppDatabase {
       this.db.prepare("VACUUM INTO ?").run(`${path}.before-migration-9-${Date.now()}.bak`);
     }
     this.migrate();
+    new MessageProfiles(this.db).initialize();
   }
 
   private migrate() {

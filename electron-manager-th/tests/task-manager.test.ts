@@ -41,7 +41,7 @@ describe("automation tasks", () => {
       expect(manager.retryBeforeSubmit({ ...task, attempts: 4 }, "ครบแล้ว")).toBe(false);
     } finally { sql.close(); }
   });
-  it("chains post, comment, share and like as one workflow", () => {
+  it("attaches independent shares and like to the verified source post", () => {
     const { sql, manager } = setup();
     try {
       const id = manager.create("account", "post", { targetUrl: "https://www.facebook.com/groups/123", caption: "โพสต์",
@@ -52,7 +52,7 @@ describe("automation tasks", () => {
       const comment = manager.list().find(row => row.action === "comment")!;
       const share = manager.list().find(row => row.action === "share")!;
       const like = manager.list().find(row => row.action === "like")!;
-      expect(comment.parentId).toBe(id); expect(share.parentId).toBe(comment.id); expect(like.parentId).toBe(share.id);
+      expect(comment.parentId).toBe(id); expect(share.parentId).toBe(id); expect(like.parentId).toBe(id);
     } finally { sql.close(); }
   });
   it("waits for the previous enabled step and cancels descendants on failure", () => {

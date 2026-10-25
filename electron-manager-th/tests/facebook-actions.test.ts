@@ -4,7 +4,7 @@ import type { Account } from "../src/shared/types";
 import type { FacebookBrowserAdapter } from "../electron/adapters/facebook-browser";
 import { assertFacebookReady, FacebookActions } from "../electron/automation/facebook-actions";
 import { actionPayloadSchema } from "../electron/automation/contracts";
-vi.mock("../electron/automation/post-target", () => ({ resolvePostTarget: async (page: Page) => page.locator('[role="article"]:visible').first() }));
+vi.mock("../electron/automation/post-target", () => ({ postIdentity: (url: string) => url.match(/posts\/(\d+)/)?.[1] || null, resolvePostTarget: async (page: Page) => page.locator('[role="article"]:visible').first() }));
 
 describe("Facebook action safeguards", () => {
   it("stops on checkpoint without interacting", async () => {
@@ -23,7 +23,7 @@ describe("Facebook action safeguards", () => {
     const click = vi.fn();
     const liked = { count: async () => 1, nth: () => ({ isVisible: async () => true, evaluate: async () => false, click }) };
     const post = { getByRole: () => liked };
-    const page = { goto: vi.fn(), url: () => "https://www.facebook.com/posts/123", locator: (selector: string) => {
+    const page = { context: () => ({ cookies: async () => [{ name: "c_user", value: "123456" }] }), goto: vi.fn(), url: () => "https://www.facebook.com/posts/123", locator: (selector: string) => {
       if (selector.startsWith("input")) return { first: () => ({ isVisible: async () => false }) };
       if (selector.startsWith("h1")) return { allTextContents: async () => [] };
       return { count: async () => 1, first: () => post };

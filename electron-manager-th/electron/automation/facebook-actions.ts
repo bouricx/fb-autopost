@@ -5,6 +5,8 @@ import type { Account } from "../../src/shared/types";
 import { FacebookBrowserAdapter } from "../adapters/facebook-browser";
 import { AuthenticationError } from "../core/errors";
 import { ActionBlockedError, UncertainResultError, type ActionPayload, type ActionKind } from "./contracts";
+import { verifyPublishedPost, canonicalPostUrl } from "./published-post";
+import { postIdentity } from "./post-target";
 import { resolvePostTarget } from "./post-target";
 import { findCommentComposer, verifiedComment } from "./comment-composer";
 import { isPendingApprovalDetected } from "./pending-approval";
@@ -36,7 +38,17 @@ export class FacebookActions {
     if (!this.features[kind]) assertActionEnabled(kind);
     return this.adapter.withActionPage({ ...account, headless: payload.headless === null ? account.headless : Number(payload.headless) }, async page => {
       let submitted = false;
+      const beforeShares = new Set<string>();
       try {
+        if (account.cookieManaged && account.sessionStatus !== "online" || ["expired", "restricted", "checkpoint", "disabled"].includes(account.sessionStatus || "")) throw new AuthenticationError("Session ไม่พร้อม กรุณาตรวจบัญชีก่อนเริ่มงาน");
+        const actor = (await page.context().cookies("https://www.facebook.com/")).find(cookie => cookie.name === "c_user")?.value;
+        if (!actor || !/^\d{5,}$/.test(actor) || account.facebookUserId && account.facebookUserId !== actor) throw new AuthenticationError("Session Facebook ไม่ตรงกับบัญชีที่เลือก กรุณาตรวจสอบ Session");
+        if (kind === "share") {
+          await page.goto(payload.targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await assertFacebookReady(page);
+          const links = await page.locator('a[href*="/posts/"],a[href*="/permalink/"],a[href*="story_fbid="]').evaluateAll(nodes => nodes.map(node => (node as HTMLAnchorElement).href));
+          links.forEach(link => { const id = postIdentity(link); if (id) beforeShares.add(id); });
+        }
         await page.goto(kind === "share" ? payload.sourceUrl || payload.targetUrl : payload.targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
         await assertFacebookReady(page);
         report("กำลังรอและค้นหาโพสต์ตามลิงก์ถาวร", 10);
@@ -107,6 +119,16 @@ export class FacebookActions {
         const group = dialog.getByText(payload.groupName, { exact: true });
         await group.first().waitFor({ state: "visible" });
         if (await group.count() !== 1) throw new ActionBlockedError("พบชื่อกลุ่มซ้ำ ไม่เลือกกลุ่มโดยเดา กรุณาแชร์ด้วยตนเอง");
+        const expectedGroup = new URL(payload.targetUrl).pathname.match(/^\/groups\/([^/]+)/)?.[1];
+        const groupLinks = await group.evaluate(node => {
+          const option = node.closest('a,[role="option"],[role="button"],button') || node.parentElement || node;
+          const anchors = [...option.querySelectorAll<HTMLAnchorElement>('a[href]')];
+          if (option instanceof HTMLAnchorElement) anchors.push(option);
+          return anchors.map(anchor => anchor.href);
+        });
+        if (!expectedGroup || !groupLinks.some(link => {
+          try { const url = new URL(link); return /(^|\.)facebook\.com$/.test(url.hostname) && url.pathname.match(/^\/groups\/([^/]+)/)?.[1] === expectedGroup; } catch { return false; }
+        })) throw new ActionBlockedError("Facebook ไม่แสดงลิงก์ยืนยันรหัสกลุ่มในตัวเลือกแชร์ หยุดก่อนส่งเพื่อไม่แชร์ผิดกลุ่ม ใช้สร้างโพสต์พร้อมลิงก์ต้นฉบับแทนได้");
         await group.click();
         const composer = page.getByRole("dialog").last();
         if (payload.caption) {
@@ -122,7 +144,27 @@ export class FacebookActions {
         await composer.waitFor({ state: "hidden", timeout: 30000 });
         await assertFacebookReady(page);
         if (this.features.pendingApprovalDetector && await isPendingApprovalDetected(page)) return { status: "pending_approval" as const, url: payload.targetUrl, message: "ส่งแชร์แล้ว แต่รอการอนุมัติจากกลุ่ม" };
-        return { status: "published" as const, url: payload.targetUrl, message: "Facebook รับคำสั่งแชร์และไม่พบข้อความรออนุมัติ" };
+        // A dismissed dialog is not proof of a published share. Verify a new post in the target group,
+        // from this account, referencing the original post. Never retry an ambiguous submission.
+        await page.goto(payload.targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        const userId = (await page.context().cookies("https://www.facebook.com/")).find(cookie => cookie.name === "c_user")?.value;
+        const sourceIdentity = postIdentity(payload.sourceUrl || "");
+        for (let attempt = 0; attempt < 15; attempt++) {
+          await assertFacebookReady(page);
+          if (await isPendingApprovalDetected(page)) return { status: "pending_approval" as const, url: payload.targetUrl, message: "ส่งแชร์แล้ว รออนุมัติจากกลุ่ม — ไปกลุ่มถัดไป" };
+          const evidence = await page.locator('[role="article"]:visible').evaluateAll(nodes => nodes.filter(node => !node.parentElement?.closest('[role="article"]')).flatMap(node => {
+            const links = [...node.querySelectorAll<HTMLAnchorElement>('a[href]')];
+            const own = links.filter(anchor => anchor.closest('[role="article"]') === node);
+            const authors = own.map(anchor => ({ name: anchor.textContent?.trim() || "", url: anchor.href }));
+            return own.filter(anchor => /\/posts\/|\/permalink\/|story_fbid=/.test(anchor.href)).map(anchor => ({ url: anchor.href, text: (node as HTMLElement).innerText, authors, mediaCount: 0, references: links.map(link => link.href) }));
+          }));
+          const matches = evidence.filter(item => sourceIdentity && item.references.some(link => postIdentity(link) === sourceIdentity) && verifyPublishedPost(item,
+            { destination: payload.targetUrl, caption: payload.caption, accountName: account.facebookName || "", userId, mediaCount: 0 }, beforeShares));
+          const urls = [...new Set(matches.map(item => canonicalPostUrl(item.url)))];
+          if (urls.length === 1) return { status: "published" as const, url: urls[0], message: "ยืนยันโพสต์แชร์ใหม่ในกลุ่ม พร้อมบัญชีและลิงก์ต้นฉบับแล้ว" };
+          await page.waitForTimeout(1000);
+        }
+        throw new UncertainResultError("ส่งแชร์แล้วแต่ยังยืนยันโพสต์ใหม่ในกลุ่มไม่ได้ กรุณาตรวจ Facebook จะไม่แชร์ซ้ำอัตโนมัติ");
       } catch (error) {
         await mkdir(this.screenshots, { recursive: true });
         const screenshot = join(this.screenshots, `action-${crypto.randomUUID()}.png`);

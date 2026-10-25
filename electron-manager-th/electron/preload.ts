@@ -4,6 +4,13 @@ import type { AppApi } from "../src/shared/types";
 const invoke = <T>(channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args) as Promise<T>;
 
 const api: AppApi = {
+  listMessageProfiles: () => invoke("profiles:list"),
+  saveMessageProfile: (id, input) => invoke("profiles:save", id, input),
+  deleteMessageProfile: id => invoke("profiles:delete", id),
+  listProfileRuns: () => invoke("profiles:runs"),
+  createProfileRun: input => invoke("profiles:start", input),
+  stopProfileRun: id => invoke("profiles:stop", id),
+  chooseImageFolder: () => invoke("media:choose-image-folder"),
   listOverdue: () => invoke("queue:overdue"),
   resolveOverdue: input => invoke("queue:resolve-overdue", input),
   listSchedules: () => invoke("schedules:list"),

@@ -47,4 +47,4 @@ jobs:
           gh release create "v$VERSION" windows/*.exe SHA256SUMS.txt \
             --repo "$REPOSITORY" --target "$SOURCE_SHA" \
             --title "AutoPost Manager TH $VERSION" \
-            --notes-file electron-manager-th/docs/RELEASE-0.6.11.md
+            --notes-file electron-manager-th/docs/RELEASE-$VERSION.md

@@ -131,6 +131,7 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
       }
       {
         for (let attempt = 0; attempt < 10; attempt++) {
+          if (FEATURES.pendingApprovalDetector && await isPendingApprovalDetected(page)) return { status: "pending_approval", message: "ส่งแล้ว แต่รอการอนุมัติจากกลุ่ม" };
           const evidence = await page.locator('[role="article"]:visible').evaluateAll(nodes => nodes.filter(node => !node.parentElement?.closest('[role="article"]')).flatMap(node => {
             const anchors = [...node.querySelectorAll<HTMLAnchorElement>('a[href]')].filter(anchor => anchor.closest('[role="article"]') === node);
             const authors = anchors.filter(anchor => !!anchor.textContent?.trim()).map(anchor => ({ name: anchor.textContent?.trim() || "", url: anchor.href }));
@@ -229,15 +230,16 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
       if (account.facebookUserId && identity !== account.facebookUserId) throw new AuthenticationError("Session Facebook ไม่ตรงบัญชีที่เลือก ไม่ดึงกลุ่มจากบัญชีอื่น");
       const found = new Map<string, FacebookGroupInfo>();
       let unchanged = 0;
-      for (let round = 0; round < 25; round++) {
+      for (let round = 0; round < 100; round++) {
         await page.waitForTimeout(round === 0 ? 900 : 1100);
         const groups = await page.locator('a[href*="/groups/"]').evaluateAll((anchors) => {
-        const ignored = new Set(["feed", "discover", "joins", "create", "notifications"]);
+        const ignored = new Set(["feed", "discover", "joins", "create", "notifications", "search", "your_groups", "memberships", "category", "suggestions"]);
         const found = new Map<string, FacebookGroupInfo>();
         for (const node of anchors) {
           const anchor = node as HTMLAnchorElement;
           let parsed: URL;
           try { parsed = new URL(anchor.href); } catch { continue; }
+          if (!["www.facebook.com", "facebook.com", "m.facebook.com"].includes(parsed.hostname)) continue;
           const match = parsed.pathname.match(/^\/groups\/([^/?#]+)/);
           const id = match?.[1];
           if (!id || ignored.has(id.toLowerCase())) continue;
@@ -258,7 +260,14 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
         });
         unchanged = mergeDiscoveredGroups(found, groups) ? 0 : unchanged + 1;
         if (unchanged >= 5 && round >= 6) break;
-        await page.evaluate(() => window.scrollTo(0, document.scrollingElement?.scrollHeight || document.body.scrollHeight));
+        await page.evaluate(() => {
+          window.scrollTo(0, document.scrollingElement?.scrollHeight || document.body.scrollHeight);
+          // Joined groups can be rendered in a scrollable pane rather than the document.
+          for (const pane of document.querySelectorAll<HTMLElement>('[role="main"], [role="main"] div')) {
+            const style = getComputedStyle(pane);
+            if (/auto|scroll/.test(style.overflowY) && pane.scrollHeight > pane.clientHeight + 100) pane.scrollTop = pane.scrollHeight;
+          }
+        });
       }
       return [...found.values()];
     } finally {
