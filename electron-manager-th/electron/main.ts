@@ -7,7 +7,8 @@ import { TaskManager } from "./automation/task-manager";
 import { QueueSafety } from "./core/queue-safety";
 import { ScheduleManager } from "./automation/schedule-manager";
 import { mainPostContent } from "../src/shared/post-content";
-import { deleteQueueItem } from "./core/queue-management";
+import { FEATURES, assertActionEnabled } from "../src/shared/features";
+import { cancelPendingQueueItems, deletePendingQueueItems, deleteQueueItem } from "./core/queue-management";
 import { actionPayloadSchema } from "./automation/contracts";
 import { NotificationManager } from "./notifications/notification-manager";
 import { ProgressBus } from "./core/progress-bus";
@@ -131,8 +132,10 @@ function registerIpc(profilesDir: string) {
     progressBus.publish({ type: "worker.changed", message: "สร้างตารางโพสต์หลายรอบแล้ว" }); return id;
   });
   ipcMain.handle("schedules:stop", (_event, id: unknown) => {
-    schedules.stop(z.string().uuid().parse(id));
-    progressBus.publish({ type: "worker.changed", message: "หยุดตารางและยกเลิกรอบที่รอแล้ว" });
+    const scheduleId = z.string().uuid().parse(id);
+    const accountId = (database.db.prepare("SELECT account_id AS accountId FROM daily_schedules WHERE id=?").get(scheduleId) as { accountId: string } | undefined)?.accountId;
+    schedules.stop(scheduleId);
+    progressBus.publish({ type: "worker.changed", accountId, message: "หยุดตารางและยกเลิกรอบที่รอแล้ว" });
   });
   ipcMain.handle("accounts:delete-group", async (_event, accountInput: unknown, groupInput: unknown) => {
     const accountId = z.string().uuid().parse(accountInput);
@@ -168,12 +171,46 @@ function registerIpc(profilesDir: string) {
     progressBus.publish({ type: "worker.changed", message: "ลบรายการและอัปเดตคิวแล้ว" });
     return true;
   });
+  ipcMain.handle("queue:cancel-pending", async (_event, raw: unknown) => {
+    const items = z.array(z.object({ kind: z.enum(["post", "workflow"]), id: z.string().uuid() })).min(1).max(2000).parse(raw);
+    const choice = await dialog.showMessageBox({ type: "warning", buttons: ["เก็บไว้", "ยืนยันยกเลิก"], defaultId: 0, cancelId: 0,
+      message: `ยกเลิกคิวที่ยังไม่ส่ง ${items.length} รายการ?`, detail: "เก็บประวัติไว้ ไม่ลบโพสต์บน Facebook และไม่หยุดงานที่กำลังทำหรืออาจส่งไปแล้ว ถ้าเป็นตารางรายวัน ต้องหยุดตารางด้วย" });
+    if (choice.response !== 1) return false;
+    const changed = cancelPendingQueueItems(database.db, items);
+    progressBus.publish({ type: "worker.changed", message: `ยกเลิกคิวที่ยังไม่ส่ง ${changed} รายการแล้ว` });
+    return changed;
+  });
+  ipcMain.handle("queue:delete-pending", async (_event, raw: unknown) => {
+    const data = z.object({ items: z.array(z.object({ kind: z.enum(["post", "workflow"]), id: z.string().uuid() })).min(1).max(2000), scheduleId: z.string().uuid().optional() }).parse(raw);
+    const choice = await dialog.showMessageBox({ type: "warning", buttons: ["เก็บไว้", "ลบคิวที่ยังไม่ส่ง"], defaultId: 0, cancelId: 0,
+      message: `ลบคิวที่ยังไม่ส่ง ${data.items.length} รายการ${data.scheduleId ? " พร้อมหยุดตาราง" : ""}?`,
+      detail: "ลบเฉพาะคิวที่ยังไม่ส่งออกจากโปรแกรม ไม่ลบโพสต์บน Facebook งานที่กำลังทำหรืออาจส่งแล้วและประวัติอื่นจะไม่ถูกลบ" });
+    if (choice.response !== 1) return false;
+    const result = database.db.transaction(() => {
+      if (data.scheduleId) {
+        const plan = database.db.prepare("SELECT enabled FROM daily_schedules WHERE id=?").get(data.scheduleId) as { enabled: number } | undefined;
+        if (!plan?.enabled) throw new Error("ตารางถูกหยุดไปแล้ว กรุณารีเฟรชคิว");
+        for (const item of data.items) {
+          if (item.kind !== "workflow") throw new Error("มีคิวที่ไม่อยู่ในตารางนี้");
+          const row = database.db.prepare("SELECT json_extract(payload_json,'$.scheduleId') AS scheduleId FROM automation_tasks WHERE id=?").get(item.id) as { scheduleId: string | null } | undefined;
+          if (row?.scheduleId !== data.scheduleId) throw new Error("มีคิวที่ไม่อยู่ในตารางนี้ กรุณารีเฟรชคิว");
+        }
+        schedules.stop(data.scheduleId);
+      }
+      return deletePendingQueueItems(database.db, data.items);
+    })();
+    progressBus.publish({ type: "worker.changed", message: `ลบคิวที่ยังไม่ส่ง ${result} รายการ${data.scheduleId ? " และหยุดตารางแล้ว" : ""}` });
+    return result;
+  });
   const notifications = new NotificationManager(database.db, vault);
   ipcMain.handle("notifications:list", () => notifications.list());
+  ipcMain.handle("notifications:probe", (_event, id: unknown) => notifications.probe(z.string().uuid().parse(id)));
+  ipcMain.handle("notifications:test-delivery", (_event, id: unknown) => notifications.testDelivery(z.string().uuid().parse(id)));
   ipcMain.handle("notifications:create", (_event, input: unknown) => notifications.create(input));
   ipcMain.handle("notifications:delete", (_event, id: unknown) => notifications.remove(z.string().uuid().parse(id)));
   const tasks = new TaskManager(database.db);
   ipcMain.handle("actions:start-workflow", (_event, raw: unknown) => {
+    if (!FEATURES.workflowFollowUp) throw new Error("ฟีเจอร์ขั้นตอนต่อเนื่องยังปิดใช้งานอยู่ สามารถเปิดได้ภายหลัง");
     if (sessionTestMode) throw new Error("โหมดทดสอบ Cookie ไม่อนุญาต action บน Facebook");
     const data = z.object({ accountId: z.string().uuid(), workflows: z.array(z.array(z.object({
       action: z.enum(["comment", "share", "like"]), payload: actionPayloadSchema,
@@ -203,7 +240,9 @@ function registerIpc(profilesDir: string) {
         const mapping = account.mappings.find(row => row.destinationId === id);
         const payload = actionPayloadSchema.parse({ targetUrl: destination.url, ...mainPostContent(account),
           delayMin: account.delayMin, delayMax: account.delayMax, headless: account.headless ?? data.settings.headless,
-          commentEnabled: account.commentEnabled, shareEnabled: account.shareEnabled, likeEnabled: account.likeEnabled,
+          commentEnabled: FEATURES.workflowFollowUp && FEATURES.comment && account.commentEnabled,
+          shareEnabled: FEATURES.workflowFollowUp && FEATURES.share && account.shareEnabled,
+          likeEnabled: FEATURES.workflowFollowUp && FEATURES.like && account.likeEnabled,
           commentTemplates: mapping?.comment || mapping?.commentImage ? [{ text: mapping.comment, image: mapping.commentImage }] : account.commentTemplates,
           repeatMinutes: account.repeatShareMinutes, shareTargets: account.shareDestinationIds.map(groupId => {
             const group = database.destination(groupId);
@@ -227,6 +266,7 @@ function registerIpc(profilesDir: string) {
   ipcMain.handle("actions:start", (_event, raw: unknown) => {
     const data = z.object({ accountId: z.string().uuid(), action: z.enum(["post", "comment", "share", "like"]),
       payloads: z.array(actionPayloadSchema).min(1).max(2000), scheduledAt: z.string().datetime().optional(), projectId: z.string().uuid().nullable().default(null) }).parse(raw);
+    if (data.action !== "post") assertActionEnabled(data.action);
     if (sessionTestMode) throw new Error("โหมดทดสอบ Cookie ไม่อนุญาต action บน Facebook");
     const ids = database.db.transaction(() => data.payloads.map(payload => tasks.create(data.accountId, data.action, payload, data.scheduledAt, data.projectId)))();
     progressBus.publish({ type: "worker.changed", message: `เพิ่มงาน ${ids.length} รายการ` });
@@ -283,10 +323,14 @@ function registerIpc(profilesDir: string) {
   });
   const accountId = (id: unknown) => z.string().uuid().parse(id);
   ipcMain.handle("accounts:preview-cookies", (_event, input: unknown) => parseCookies(z.string().max(2_000_000).parse(input)).map(item => ({ userId: item.userId, format: item.format })));
-  ipcMain.handle("accounts:import-cookies", (event, input: unknown) => manager.importMultipleCookies(z.string().max(2_000_000).parse(input), progress => {
+  ipcMain.handle("accounts:import-cookies", (event, input: unknown, name: unknown) => manager.importMultipleCookies(z.string().max(2_000_000).parse(input), progress => {
     if (!event.sender.isDestroyed()) event.sender.send("accounts:session-progress", progress);
-  }));
+  }, name === undefined ? undefined : z.string().trim().min(1).max(80).parse(name)));
   ipcMain.handle("accounts:check-session", (_event, id: unknown) => manager.checkSession(accountId(id)));
+  ipcMain.handle("accounts:login-and-check", (_event, id: unknown) => manager.loginWithBrowser(accountId(id)));
+  ipcMain.handle("accounts:create-and-login", (_event, name: unknown) => manager.createAndLoginWithBrowser(z.string().trim().min(1).max(80).parse(name)));
+  ipcMain.handle("accounts:rename", (_event, id: unknown, name: unknown) => database.renameAccount(accountId(id), z.string().trim().min(1).max(80).parse(name)));
+  ipcMain.handle("accounts:import-cookie-existing", (_event, id: unknown, input: unknown) => manager.importCookieForAccount(accountId(id), z.string().max(2_000_000).parse(input)));
   ipcMain.handle("accounts:delete-session", (_event, id: unknown) => manager.deleteSession(accountId(id)));
   ipcMain.handle("accounts:copy-cookie", (_event, id: unknown) => manager.copyCookieToClipboard(accountId(id)));
   ipcMain.handle("accounts:export-session", (_event, id: unknown, password: unknown) => manager.exportSession(accountId(id), z.string().min(12).max(1024).parse(password)));
@@ -309,7 +353,7 @@ function registerIpc(profilesDir: string) {
     const account = database.accountRecord(z.string().uuid().parse(id));
     if (!account || account.adapterType !== "facebook-browser") throw new Error("ไม่พบบัญชี Facebook");
     await adapters.get("facebook-browser").openLogin?.(account);
-    database.setAccountStatus(account.id, "active");
+    // Opening a browser is not proof of authentication. Status changes only after SessionChecker verifies it.
   });
   ipcMain.handle("accounts:discover-groups", async (_event, id: string) => {
     const account = database.accountRecord(z.string().uuid().parse(id));
@@ -322,15 +366,17 @@ function registerIpc(profilesDir: string) {
       const timestamp = new Date().toISOString();
       const previous = (database.db.prepare("SELECT COUNT(*) AS count FROM facebook_groups WHERE account_id=?").get(account.id) as { count: number }).count;
       database.db.transaction(() => {
-        const save = database.db.prepare(`INSERT INTO facebook_groups(id,account_id,facebook_group_id,name,url,image_url,discovered_from,last_seen_at)
-          VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,facebook_group_id) DO UPDATE SET name=excluded.name,url=excluded.url,
+        const save = database.db.prepare(`INSERT INTO facebook_groups(id,account_id,facebook_group_id,name,url,image_url,discovered_from,last_seen_at,post_permission,share_permission)
+          VALUES(?,?,?,?,?,?,?,?,'unknown','unknown') ON CONFLICT(account_id,facebook_group_id) DO UPDATE SET name=excluded.name,url=excluded.url,
           image_url=COALESCE(excluded.image_url,facebook_groups.image_url),last_seen_at=excluded.last_seen_at`);
         for (const group of groups) save.run(crypto.randomUUID(), account.id, group.id, group.name, group.url, group.imageUrl, "joined-groups", timestamp);
       })();
       const total = (database.db.prepare("SELECT COUNT(*) AS count FROM facebook_groups WHERE account_id=?").get(account.id) as { count: number }).count;
       database.db.prepare("UPDATE accounts SET groups_refreshed_at=?,groups_count_difference=? WHERE id=?").run(timestamp, total - previous, account.id);
       progressBus.publish({ type: "target.succeeded", accountId: account.id, percent: 100, message: `ดึงได้ ${groups.length} กลุ่ม เพิ่มใหม่ ${total - previous} กลุ่ม รวมสะสม ${total} กลุ่ม` });
-      return groups;
+      const permissions = database.db.prepare("SELECT facebook_group_id AS id,post_permission AS postPermission,share_permission AS sharePermission FROM facebook_groups WHERE account_id=?").all(account.id) as { id: string; postPermission: "unknown" | "allowed" | "denied"; sharePermission: "unknown" | "allowed" | "denied" }[];
+      const permissionMap = new Map(permissions.map(row => [row.id, row]));
+      return groups.map(group => ({ ...group, ...permissionMap.get(group.id) }));
     } catch (error) {
       progressBus.publish({ type: "target.failed", accountId: account.id, message: "รีเฟรชกลุ่มไม่สำเร็จ กรุณาตรวจ Session" });
       throw error;

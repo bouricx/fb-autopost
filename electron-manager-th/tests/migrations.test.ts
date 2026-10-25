@@ -7,6 +7,8 @@ import { migrateAutomationTasks } from "../electron/core/migrations/004-automati
 import { migrateJobDelay } from "../electron/core/migrations/005-job-delay";
 import { migrateDailySchedules } from "../electron/core/migrations/006-daily-schedules";
 import { migrateQueueSafety } from "../electron/core/migrations/007-queue-safety";
+import { migrateGroupPermissions } from "../electron/core/migrations/008-group-permissions";
+import { migrateFacebookIdentity } from "../electron/core/migrations/009-facebook-identity";
 
 it("migrates legacy rows without loss and is safe to repeat", () => {
   const sql = new DatabaseSync(":memory:");
@@ -31,9 +33,14 @@ it("migrates legacy rows without loss and is safe to repeat", () => {
     migrateJobDelay(db); migrateJobDelay(db);
     migrateDailySchedules(db); migrateDailySchedules(db);
     migrateQueueSafety(db); migrateQueueSafety(db);
+    migrateGroupPermissions(db); migrateGroupPermissions(db);
+    migrateFacebookIdentity(db); migrateFacebookIdentity(db);
     expect(sql.prepare("SELECT name,proxy_url,session_status,headless FROM accounts WHERE id='legacy'").get()).toMatchObject({ name: "บัญชีเดิม", proxy_url: "http://localhost:8080", session_status: "unknown", headless: 1 });
     expect(sql.prepare("SELECT id FROM jobs").all()).toHaveLength(1);
-    expect(sql.prepare("SELECT * FROM schema_migrations").all()).toHaveLength(6);
+    expect(sql.prepare("SELECT * FROM schema_migrations").all()).toHaveLength(8);
+    expect(sql.prepare("SELECT facebook_user_id,facebook_name,facebook_actor_type FROM accounts WHERE id='legacy'").get())
+      .toMatchObject({ facebook_user_id: null, facebook_name: null, facebook_actor_type: "unknown" });
+    expect(sql.prepare("SELECT post_permission,share_permission FROM facebook_groups").all()).toEqual([]);
     expect(sql.prepare("SELECT delay_min,delay_max FROM jobs WHERE id='job-old'").get()).toMatchObject({ delay_min: 30, delay_max: 90 });
     expect(sql.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   } finally { sql.close(); }

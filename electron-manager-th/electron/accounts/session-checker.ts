@@ -1,9 +1,10 @@
 import type { BrowserContext, Page } from "playwright-core";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { inspectFacebookIdentity, type VerifiedFacebookIdentity } from "./facebook-identity";
 
 export type SessionStatus = "online" | "expired" | "restricted" | "checkpoint" | "disabled" | "unknown";
-export interface SessionResult { status: SessionStatus; message: string; checkedAt: string; screenshot?: string }
+export interface SessionResult { status: SessionStatus; message: string; checkedAt: string; screenshot?: string; identity?: VerifiedFacebookIdentity | null }
 
 export class SessionChecker {
   constructor(private readonly screenshotsDir: string) {}
@@ -18,9 +19,11 @@ export class SessionChecker {
       result = { status: "unknown", message: "ตรวจสอบไม่สำเร็จ กรุณาตรวจเครือข่ายหรือ Proxy", checkedAt: new Date().toISOString() };
     }
     if (result.status !== "online") {
-      await mkdir(this.screenshotsDir, { recursive: true });
-      const screenshot = join(this.screenshotsDir, `session-${crypto.randomUUID()}.png`);
-      if (await page.screenshot({ path: screenshot }).then(() => true, () => false)) result.screenshot = screenshot;
+      try {
+        await mkdir(this.screenshotsDir, { recursive: true });
+        const screenshot = join(this.screenshotsDir, `session-${crypto.randomUUID()}.png`);
+        if (await page.screenshot({ path: screenshot }).then(() => true, () => false)) result.screenshot = screenshot;
+      } catch { /* Screenshot failure must not prevent saving the actual session state. */ }
     }
     await page.close().catch(() => undefined);
     return result;
@@ -39,8 +42,10 @@ export class SessionChecker {
     const cookies = await context.cookies("https://www.facebook.com/");
     const identity = cookies.find(cookie => cookie.name === "c_user");
     const accountControl = page.getByRole("button", { name: /Your profile|Account|โปรไฟล์ของคุณ|บัญชีของคุณ/i }).first();
-    if (identity && (!userId || identity.value === userId) && await accountControl.isVisible().catch(() => false)) {
-      return { status: "online", message: "ตรวจพบ Session และเมนูบัญชีที่ล็อกอินแล้ว", checkedAt };
+    if (identity && userId && identity.value !== userId) return { status: "unknown", message: "Session เป็นคนละบัญชี ไม่เริ่มงานอัตโนมัติ", checkedAt };
+    if (identity && await accountControl.isVisible().catch(() => false)) {
+      const verified = await inspectFacebookIdentity(page, context, identity.value).catch(() => null);
+      return { status: "online", message: "ตรวจพบ Session และเมนูบัญชีที่ล็อกอินแล้ว", checkedAt, identity: verified };
     }
     return { status: "unknown", message: "ยังยืนยันสถานะล็อกอินไม่ได้ ไม่เริ่มงานอัตโนมัติ", checkedAt };
   }

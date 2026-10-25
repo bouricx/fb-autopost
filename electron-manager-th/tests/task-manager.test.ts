@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { TaskManager } from "../electron/automation/task-manager";
 import { actionPayloadSchema } from "../electron/automation/contracts";
+const enabledFeatures = { comment: true, share: true, like: true, workflowFollowUp: true, pendingApprovalDetector: true, groupPermissionCheck: true };
 function setup() {
   const sql = new DatabaseSync(":memory:");
   sql.exec(`CREATE TABLE accounts(id TEXT PRIMARY KEY,adapter_type TEXT,status TEXT,cooldown_until TEXT);
@@ -11,7 +12,7 @@ function setup() {
     CREATE TABLE automation_events(task_id TEXT,account_id TEXT,level TEXT,message TEXT,created_at TEXT);`);
   const db = { prepare: (query: string) => sql.prepare(query), transaction: (work: () => unknown) => () => { sql.exec("SAVEPOINT work"); try { const result = work(); sql.exec("RELEASE work"); return result; } catch (error) { sql.exec("ROLLBACK TO work; RELEASE work"); throw error; } } } as unknown as Database.Database;
   sql.exec("ALTER TABLE automation_tasks ADD COLUMN idempotency_key TEXT; CREATE UNIQUE INDEX task_key ON automation_tasks(idempotency_key); ALTER TABLE automation_tasks ADD COLUMN submission_state TEXT DEFAULT 'not_sent'");
-  return { sql, manager: new TaskManager(db) };
+  return { sql, manager: new TaskManager(db, enabledFeatures) };
 }
 describe("automation tasks", () => {
   it("does not duplicate the same logical task or follow-up on repeated calls", () => {

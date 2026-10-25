@@ -8,6 +8,10 @@ import { AuthenticationError, isProfileBusy, ProfileBusyError } from "../core/er
 import { RetryableBeforeSubmitError, UncertainResultError } from "../automation/contracts";
 import { postIdentity } from "../automation/post-target";
 import { canonicalPostUrl, verifyPublishedPost } from "../automation/published-post";
+import { isPendingApprovalDetected } from "../automation/pending-approval";
+import { FEATURES } from "../../src/shared/features";
+import { mergeDiscoveredGroups } from "../automation/group-image";
+import { dnsFailureCode, NetworkUnavailableError } from "../core/network-safety";
 
 const COMPOSER_TEXT = /เขียนอะไร|คุณกำลังคิดอะไร|สร้างโพสต์|Write something|What's on your mind|Create post/i;
 const PHOTO_TEXT = /รูปภาพ|วิดีโอ|Photo|video/i;
@@ -87,11 +91,16 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
     if (["expired", "restricted", "checkpoint", "disabled"].includes(context.account.sessionStatus || "")) {
       throw new AuthenticationError("Session ไม่พร้อมใช้งาน กรุณาตรวจสอบและยืนยันตัวตนด้วยตนเอง");
     }
-    const browser = await this.context(context.account);
-    const page = await browser.newPage();
-    let submitted = false;
-    try {
-      if (!context.destination.url?.startsWith("https://www.facebook.com/")) throw new Error("Facebook URL ไม่ถูกต้อง");
+      const browser = await this.context(context.account);
+      let page: Page | undefined;
+      let submitted = false;
+      try {
+       page = await browser.newPage();
+      if (!context.destination.url) throw new Error("Facebook URL ไม่ถูกต้อง");
+      const target = new URL(context.destination.url);
+      if (target.protocol !== "https:" || !["www.facebook.com", "facebook.com", "m.facebook.com"].includes(target.hostname) || target.username || target.password) {
+        throw new Error("Facebook URL ไม่ถูกต้อง");
+      }
       await page.goto(context.destination.url, { waitUntil: "domcontentloaded", timeout: 60_000 });
       if (/login|checkpoint/i.test(page.url())) throw new AuthenticationError("บัญชี Facebook ต้องล็อกอินหรือยืนยันตัวตน");
       await page.waitForTimeout(2_000);
@@ -105,12 +114,21 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
       ]);
       if (!submit) throw new Error("ไม่พบปุ่มโพสต์ Facebook");
       const before = new Set((await page.locator('a[href*="/posts/"],a[href*="/permalink/"],a[href*="story_fbid="]').evaluateAll(nodes => nodes.map(node => (node as HTMLAnchorElement).href))).map(postIdentity).filter((id): id is string => !!id));
-      const userId = (await browser.cookies("https://www.facebook.com/")).find(cookie => cookie.name === "c_user")?.value;
+       const userId = (await browser.cookies("https://www.facebook.com/")).find(cookie => cookie.name === "c_user")?.value;
+       if (!userId || !/^\d{5,}$/.test(userId) || (context.account.facebookUserId && context.account.facebookUserId !== userId)) {
+         throw new AuthenticationError("Session Facebook ไม่ตรงกับบัญชีนี้ กรุณาตรวจสอบ Session ก่อนโพสต์");
+       }
       submitted = true;
       context.onSubmitting?.();
       await submit.click();
       try { await dialog.waitFor({ state: "hidden", timeout: 60_000 }); }
       catch { throw new UncertainResultError("กดโพสต์แล้วแต่ยืนยันผลไม่ได้ กรุณาตรวจ Facebook ก่อนลองใหม่เพื่อป้องกันโพสต์ซ้ำ"); }
+      if (FEATURES.pendingApprovalDetector && await isPendingApprovalDetected(page)) {
+        await mkdir(context.screenshotsDir, { recursive: true });
+        const screenshot = join(context.screenshotsDir, `${context.job.id}-pending-approval-${Date.now()}.png`);
+        await page.screenshot({ path: screenshot, fullPage: true });
+        return { status: "pending_approval", message: "ส่งแล้ว แต่รอการอนุมัติจากกลุ่ม", screenshot };
+      }
       {
         for (let attempt = 0; attempt < 10; attempt++) {
           const evidence = await page.locator('[role="article"]:visible').evaluateAll(nodes => nodes.filter(node => !node.parentElement?.closest('[role="article"]')).flatMap(node => {
@@ -119,9 +137,14 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
             const mediaCount = [...node.querySelectorAll('img')].filter(image => image.closest('[role="article"]') === node && image.getBoundingClientRect().width >= 100 && image.getBoundingClientRect().height >= 100).length;
             return anchors.filter(anchor => /\/posts\/|\/permalink\/|story_fbid=/.test(anchor.href)).map(anchor => ({ url: anchor.href, text: (node as HTMLElement).innerText, authors, mediaCount }));
           }));
-          const verified = evidence.filter(item => verifyPublishedPost(item, { destination: context.destination.url!, caption: context.job.caption, accountName: context.account.name, userId, mediaCount: context.job.media.length }, before));
+           const verified = evidence.filter(item => verifyPublishedPost(item, { destination: context.destination.url!, caption: context.job.caption, accountName: context.account.facebookName || "", userId, mediaCount: context.job.media.length }, before));
           const urls = [...new Set(verified.map(item => canonicalPostUrl(item.url)))];
-          if (urls.length === 1) return { publishedUrl: urls[0] };
+          if (urls.length === 1) {
+            await mkdir(context.screenshotsDir, { recursive: true });
+            const screenshot = join(context.screenshotsDir, `${context.job.id}-published-${Date.now()}.png`);
+            await page.screenshot({ path: screenshot, fullPage: true });
+            return { status: "published", permalink: urls[0], publishedUrl: urls[0], screenshot };
+          }
           await page.waitForTimeout(1000);
         }
         throw new UncertainResultError("Facebook ปิดหน้าสร้างโพสต์แล้ว แต่ยังยืนยันลิงก์โพสต์ใหม่ไม่ได้ งานต่อเนื่องจะไม่เริ่ม กรุณาตรวจด้วยตนเอง");
@@ -129,13 +152,15 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
     } catch (error) {
       await mkdir(context.screenshotsDir, { recursive: true });
       const screenshot = join(context.screenshotsDir, `${context.job.id}-${Date.now()}.png`);
-      await page.screenshot({ path: screenshot, fullPage: true }).catch(() => undefined);
+      await page?.screenshot({ path: screenshot, fullPage: true }).catch(() => undefined);
       if (error instanceof Error) Object.assign(error, { screenshot });
       if (submitted && !(error instanceof UncertainResultError)) throw Object.assign(new UncertainResultError("ส่งคำสั่งโพสต์แล้วแต่ยืนยันผลไม่ได้ กรุณาตรวจ Facebook ก่อนลองใหม่"), { screenshot });
-      if (!submitted && error instanceof Error && /net::ERR_|navigation.*timeout|page\.goto.*timeout/i.test(error.message)) throw Object.assign(new RetryableBeforeSubmitError("เครือข่ายผิดพลาดก่อนส่งโพสต์ ระบบจะลองใหม่"), { screenshot });
+       const dnsCode = dnsFailureCode(error);
+       if (!submitted && dnsCode) throw Object.assign(new NetworkUnavailableError("Facebook", dnsCode), { screenshot });
+       if (!submitted && error instanceof Error && /net::ERR_|navigation.*timeout|page\.goto.*timeout/i.test(error.message)) throw Object.assign(new RetryableBeforeSubmitError("เครือข่ายผิดพลาดก่อนส่งโพสต์ ระบบจะลองใหม่"), { screenshot });
       throw error;
     } finally {
-      await page.close().catch(() => undefined);
+      await page?.close().catch(() => undefined);
       await browser.close().catch(() => undefined);
       this.contexts.delete(context.account.id);
     }
@@ -193,18 +218,20 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
   }
 
   async discoverGroups(account: Account): Promise<FacebookGroupInfo[]> {
-    const ownsBrowser = !this.contexts.has(account.id);
+    if (this.contexts.has(account.id) || this.launching.has(account.id)) throw new ProfileBusyError();
     const browser = await this.context({ ...account, headless: 1 });
     let page: Page | undefined;
     try {
       page = await browser.newPage();
       await page.goto("https://www.facebook.com/groups/joins/?nav_source=tab&ordering=viewer_added", { waitUntil: "domcontentloaded", timeout: 60_000 });
       if (/login|checkpoint/i.test(page.url())) throw new AuthenticationError("บัญชี Facebook ต้องล็อกอินหรือยืนยันตัวตน");
-      for (let round = 0; round < 6; round++) {
-        await page.mouse.wheel(0, 1600);
-        await page.waitForTimeout(700);
-      }
-      return await page.locator('a[href*="/groups/"]').evaluateAll((anchors) => {
+      const identity = (await browser.cookies("https://www.facebook.com/")).find(cookie => cookie.name === "c_user")?.value;
+      if (account.facebookUserId && identity !== account.facebookUserId) throw new AuthenticationError("Session Facebook ไม่ตรงบัญชีที่เลือก ไม่ดึงกลุ่มจากบัญชีอื่น");
+      const found = new Map<string, FacebookGroupInfo>();
+      let unchanged = 0;
+      for (let round = 0; round < 25; round++) {
+        await page.waitForTimeout(round === 0 ? 900 : 1100);
+        const groups = await page.locator('a[href*="/groups/"]').evaluateAll((anchors) => {
         const ignored = new Set(["feed", "discover", "joins", "create", "notifications"]);
         const found = new Map<string, FacebookGroupInfo>();
         for (const node of anchors) {
@@ -217,23 +244,27 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
           const name = (anchor.getAttribute("aria-label") || anchor.getAttribute("title") || anchor.textContent || "")
             .replace(/ใช้งานล่าสุด.*$/s, "").replace(/\s+/g, " ").trim();
           if (!name || name.length > 160) continue;
-          const image = anchor.querySelector("img") as HTMLImageElement | null;
-          const svgImage = anchor.querySelector("image");
-          const imageUrl = image?.currentSrc || image?.src || svgImage?.getAttribute("href") || svgImage?.getAttribute("xlink:href") || null;
+           const image = anchor.querySelector("img") as HTMLImageElement | null;
+           const svgImage = anchor.querySelector("image");
+           const rawImage = image?.currentSrc || image?.src || image?.getAttribute("data-src") || svgImage?.getAttribute("href") || svgImage?.getAttribute("xlink:href") || null;
+           const imageUrl = rawImage && /^https:\/\//i.test(rawImage) ? rawImage : null;
           const url = `https://www.facebook.com/groups/${id}/`;
           const previous = found.get(id);
           if (!previous || (previous.imageUrl === null && imageUrl)) {
-            found.set(id, { id, name, url, imageUrl });
+            found.set(id, { id, name, url, imageUrl, postPermission: "unknown", sharePermission: "unknown" });
           }
         }
         return [...found.values()];
-      });
+        });
+        unchanged = mergeDiscoveredGroups(found, groups) ? 0 : unchanged + 1;
+        if (unchanged >= 5 && round >= 6) break;
+        await page.evaluate(() => window.scrollTo(0, document.scrollingElement?.scrollHeight || document.body.scrollHeight));
+      }
+      return [...found.values()];
     } finally {
       await page?.close().catch(() => undefined);
-      if (ownsBrowser) {
-        await browser.close().catch(() => undefined);
-        if (this.contexts.get(account.id) === browser) this.contexts.delete(account.id);
-      }
+      await browser.close().catch(() => undefined);
+      if (this.contexts.get(account.id) === browser) this.contexts.delete(account.id);
     }
   }
 }

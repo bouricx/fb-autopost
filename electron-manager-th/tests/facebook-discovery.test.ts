@@ -9,10 +9,10 @@ describe("group discovery browser lifecycle", () => {
   beforeEach(() => vi.clearAllMocks());
   function setup() {
     const page = { goto: vi.fn().mockResolvedValue(undefined), url: () => "https://www.facebook.com/groups/joins/",
-      mouse: { wheel: vi.fn().mockResolvedValue(undefined) }, waitForTimeout: vi.fn().mockResolvedValue(undefined),
-      locator: () => ({ evaluateAll: vi.fn().mockResolvedValue([{ id: "123", name: "กลุ่ม", url: "https://www.facebook.com/groups/123/", imageUrl: null }]) }),
+       mouse: { wheel: vi.fn().mockResolvedValue(undefined) }, evaluate: vi.fn().mockResolvedValue(undefined), waitForTimeout: vi.fn().mockResolvedValue(undefined),
+       locator: () => ({ count: vi.fn().mockResolvedValue(0), evaluateAll: vi.fn().mockResolvedValue([{ id: "123", name: "กลุ่ม", url: "https://www.facebook.com/groups/123/", imageUrl: null }]) }),
       close: vi.fn().mockResolvedValue(undefined) };
-    const browser = { newPage: vi.fn().mockResolvedValue(page), close: vi.fn().mockResolvedValue(undefined), setDefaultTimeout: vi.fn(), on: vi.fn() };
+    const browser = { newPage: vi.fn().mockResolvedValue(page), close: vi.fn().mockResolvedValue(undefined), cookies: vi.fn().mockResolvedValue([]), setDefaultTimeout: vi.fn(), on: vi.fn() };
     mocks.launch.mockResolvedValue(browser);
     return { page, browser, adapter: new FacebookBrowserAdapter() };
   }
@@ -41,5 +41,11 @@ describe("group discovery browser lifecycle", () => {
     browser.newPage.mockRejectedValueOnce(new Error("closed"));
     await expect(adapter.discoverGroups(account)).rejects.toThrow();
     expect(browser.close).toHaveBeenCalled();
+  });
+  it("refuses to discover groups from a different verified Facebook account", async () => {
+    const { browser, adapter } = setup();
+    browser.cookies.mockResolvedValue([{ name: "c_user", value: "99999" }]);
+    await expect(adapter.discoverGroups({ ...account, facebookUserId: "12345" })).rejects.toThrow(/ไม่ตรงบัญชี/);
+    expect(browser.close).toHaveBeenCalledTimes(1);
   });
 });

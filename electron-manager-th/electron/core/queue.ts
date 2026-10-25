@@ -14,16 +14,25 @@ import { ScheduleManager } from "../automation/schedule-manager";
 import { NotificationManager } from "../notifications/notification-manager";
 import { delayMilliseconds } from "../../src/shared/delay";
 import { QueueSafety } from "./queue-safety";
+import { canCreatePostFollowUps } from "../automation/workflow-gate";
+import { updateGroupPermission } from "../automation/group-permissions";
+import { FEATURES, assertActionEnabled } from "../../src/shared/features";
+import { NetworkUnavailableError } from "./network-safety";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const notificationFailed = (result: { delivered: number; failed: number; missing: boolean } | undefined) => !result || (result.delivered === 0 && (result.failed > 0 || result.missing));
 
 export class QueueEngine {
   private running = false;
+  private stopping = false;
   private loopPromise: Promise<void> | null = null;
   private readonly activeAccounts = new Set<string>();
   private readonly activeWork = new Set<Promise<void>>();
   private track(work: Promise<void>) {
-    const safe = work.catch(() => { this.database.log("error", "queue", "เกิดข้อผิดพลาดใน Worker กรุณาตรวจประวัติก่อนเริ่มใหม่"); });
+    const safe = work.catch(() => {
+      try { this.database.log("error", "queue", "เกิดข้อผิดพลาดใน Worker กรุณาตรวจประวัติก่อนเริ่มใหม่"); }
+      catch { /* Keep the worker promise handled even if logging fails. */ }
+    });
     this.activeWork.add(safe);
     void safe.finally(() => this.activeWork.delete(safe));
   }
@@ -39,6 +48,7 @@ export class QueueEngine {
 
   start() {
     if (this.running) return;
+    if (this.stopping) throw new Error("ระบบคิวกำลังหยุด กรุณารอให้งานปัจจุบันจบก่อนเปิดใหม่");
     this.running = true;
     this.database.recoverInterruptedJobs();
     new TaskManager(this.database.db).recover();
@@ -50,12 +60,16 @@ export class QueueEngine {
   }
 
   async stop() {
-    this.running = false;
-    await this.loopPromise;
-    await Promise.allSettled([...this.activeWork]);
-    this.loopPromise = null;
-    this.database.log("info", "queue", "หยุดระบบคิว");
-    this.progress?.publish({ type: "worker.changed", message: "หยุดระบบคิว" });
+    if (this.stopping) return;
+    this.stopping = true;
+    try {
+      this.running = false;
+      await this.loopPromise;
+      await Promise.allSettled([...this.activeWork]);
+      this.loopPromise = null;
+      this.database.log("info", "queue", "หยุดระบบคิว");
+      this.progress?.publish({ type: "worker.changed", message: "หยุดระบบคิว" });
+    } finally { this.stopping = false; }
   }
 
   status() { return { running: this.running }; }
@@ -114,6 +128,17 @@ export class QueueEngine {
         screenshotsDir: this.screenshotsDir,
         onSubmitting: () => { this.database.db.prepare("UPDATE jobs SET submission_state='unknown' WHERE id=?").run(job.id); },
       });
+      if (account.adapterType === "facebook-browser" && result.status === "pending_approval") {
+        this.database.failJob(job, attemptId, "ส่งแล้ว แต่รอการอนุมัติจากกลุ่ม ไม่ถือว่าเผยแพร่สำเร็จ", null, result.screenshot);
+        this.database.db.prepare("UPDATE jobs SET status='pending_approval',submission_state='sent' WHERE id=?").run(job.id);
+        await new NotificationManager(this.database.db, this.vault).send(job.accountId, null, null,
+          `${account.name}: ส่งโพสต์ไปยัง ${destination.name} แล้ว แต่รออนุมัติจากกลุ่ม ยังไม่ถือว่าเผยแพร่สำเร็จ`)
+          .catch(() => this.database.log("warn", "notification", "แจ้งเตือนโพสต์รออนุมัติส่งไม่สำเร็จ"));
+        return;
+      }
+      if (account.adapterType === "facebook-browser" && !canCreatePostFollowUps(result)) {
+        throw new UncertainResultError("โพสต์ยังไม่ได้รับการยืนยัน published พร้อม permalink กรุณาตรวจ Facebook ก่อนส่งซ้ำ");
+      }
       this.database.completeJob(job, attemptId, result.publishedUrl);
       this.database.db.prepare("UPDATE jobs SET submission_state='sent' WHERE id=? AND status='succeeded'").run(job.id);
       this.database.setAccountStatus(account.id, "active");
@@ -132,9 +157,18 @@ export class QueueEngine {
       if (error instanceof UncertainResultError) this.database.db.prepare("UPDATE jobs SET status='uncertain',submission_state='unknown' WHERE id=?").run(job.id);
       if (error instanceof AuthenticationError) this.database.setAccountStatus(job.accountId, "needs_login");
       if (error instanceof RateLimitError) this.database.setAccountStatus(job.accountId, "rate_limited");
-      this.database.log("error", job.accountName, `โพสต์ไม่สำเร็จ: ${message}`, { retryAt, screenshot });
-      this.progress?.publish({ type: "target.failed", accountId: job.accountId, jobId: job.id, destinationId: job.destinationId, message });
-      if (Notification.isSupported()) new Notification({ title: "AutoPost ไม่สำเร็จ", body: `${job.destinationName}: ${message}` }).show();
+      if (error instanceof NetworkUnavailableError) {
+        this.database.setAccountStatus(job.accountId, "paused");
+        new QueueSafety(this.database.db).holdOverdue();
+        this.database.db.prepare("UPDATE accounts SET status_message=? WHERE id=?").run(error.message, job.accountId);
+      }
+       this.database.log("error", job.accountName, `โพสต์ไม่สำเร็จ: ${message}`, { retryAt, screenshot });
+       const delivery = await new NotificationManager(this.database.db, this.vault).send(job.accountId, null, null,
+         `${job.accountName}: โพสต์ไม่สำเร็จ ${job.destinationName}\nเหตุผล: ${message}${error instanceof UncertainResultError ? "\nผลไม่แน่ชัด กรุณาตรวจบน Facebook ก่อนส่งซ้ำ" : ""}`)
+         .catch(() => { this.database.log("warn", "notification", "แจ้งเตือนงานโพสต์ล้มเหลวส่งไม่สำเร็จ"); return undefined; });
+       const notice = notificationFailed(delivery) ? `${message} · Discord ไม่ได้รับแจ้ง` : message;
+       this.progress?.publish({ type: "target.failed", accountId: job.accountId, jobId: job.id, destinationId: job.destinationId, message: notice });
+       if (Notification.isSupported()) new Notification({ title: "AutoPost ไม่สำเร็จ", body: `${job.destinationName}: ${notice}` }).show();
     } finally {
       const delay = delayMilliseconds(job.delayMin ?? 30, job.delayMax ?? 90);
       this.database.db.prepare("UPDATE accounts SET cooldown_until=? WHERE id=?").run(new Date(Date.now() + delay).toISOString(), job.accountId);
@@ -154,7 +188,8 @@ export class QueueEngine {
       if (!account || account.status !== "active") throw new AuthenticationError("บัญชียังไม่พร้อมทำงาน");
       const adapter = this.adapters.get("facebook-browser");
       if (!(adapter instanceof FacebookBrowserAdapter)) throw new Error("ไม่พบ Facebook adapter");
-      let result: { url: string; message: string };
+      let result: { status: "published" | "pending_approval"; url: string; message: string };
+      if (task.action !== "post") assertActionEnabled(task.action);
       if (task.action === "post") {
         const destination = this.database.listDestinations(account.id).find(row => row.url === task.payload.targetUrl);
         if (!destination) throw new ActionBlockedError("ไม่พบปลายทางโพสต์ในบัญชีนี้");
@@ -165,12 +200,30 @@ export class QueueEngine {
           destination, job, secret: null, screenshotsDir: this.screenshotsDir,
           requirePermalink: true,
           onSubmitting: () => { submitted = true; this.database.db.prepare("UPDATE automation_tasks SET submission_state='unknown' WHERE id=?").run(task.id); } });
-        result = { url: published.publishedUrl || task.payload.targetUrl, message: "ส่งโพสต์แล้ว" };
-        if ((task.payload.commentEnabled || task.payload.shareEnabled || task.payload.likeEnabled) && !/\/(posts|permalink)\/|story_fbid=/.test(result.url)) {
-          throw new UncertainResultError("ส่งโพสต์แล้วแต่ไม่พบลิงก์ถาวร หยุดงานต่อเนื่องเพื่อป้องกันเลือกโพสต์ผิด กรุณาตรวจ Facebook");
+        if (published.status === "pending_approval") {
+          tasks.finish(task, "pending_approval", published.message || "ส่งแล้ว แต่รอการอนุมัติจากกลุ่ม", task.payload.targetUrl);
+          this.database.db.prepare("UPDATE automation_tasks SET submission_state='sent' WHERE id=?").run(task.id);
+          if (FEATURES.groupPermissionCheck) updateGroupPermission(this.database.db, task.accountId, task.payload.targetUrl, "post", "allowed", "Facebook รับโพสต์แล้วและแจ้งรออนุมัติ");
+          emit("target.succeeded", "ส่งโพสต์แล้ว แต่รอการอนุมัติ — ไม่สร้าง Comment/Share/Like", 100);
+          await new NotificationManager(this.database.db, this.vault).send(task.accountId, task.projectId, task.payload.channelId,
+            `${account.name}: ส่งโพสต์แล้ว แต่รออนุมัติจากกลุ่ม ${destination.name} ยังไม่ถือว่าเผยแพร่สำเร็จ`)
+            .catch(() => this.database.log("warn", "notification", "แจ้งเตือนโพสต์รออนุมัติส่งไม่สำเร็จ"));
+          return;
         }
+        if (!canCreatePostFollowUps(published)) {
+          throw new UncertainResultError("โพสต์ยังไม่ได้รับการยืนยัน published พร้อม permalink — หยุดขั้นตอนถัดไป");
+        }
+        result = { status: "published", url: published.permalink!, message: "published — ยืนยันโพสต์และ permalink แล้ว" };
+        if (FEATURES.groupPermissionCheck) updateGroupPermission(this.database.db, task.accountId, task.payload.targetUrl, "post", "allowed", "ยืนยัน published พร้อม permalink แล้ว");
       } else result = await new FacebookActions(adapter, this.screenshotsDir).execute(task.action, account, task.payload,
         (message, percent) => emit("target.progress", message, percent), () => { submitted = true; this.database.db.prepare("UPDATE automation_tasks SET submission_state='unknown' WHERE id=?").run(task.id); });
+      if (result.status === "pending_approval") {
+        tasks.finish(task, "pending_approval", result.message, result.url);
+        this.database.db.prepare("UPDATE automation_tasks SET submission_state='sent' WHERE id=?").run(task.id);
+        if (FEATURES.groupPermissionCheck && task.action === "share") updateGroupPermission(this.database.db, task.accountId, task.payload.targetUrl, "share", "allowed", result.message);
+        emit("target.succeeded", `${result.message} — หยุดขั้นตอนถัดไป`, 100);
+        return;
+      }
       this.database.db.transaction(() => {
         tasks.finish(task, "succeeded", result.message, result.url);
         tasks.followUps(task, result.url);
@@ -179,13 +232,27 @@ export class QueueEngine {
       emit("target.succeeded", result.message, 100);
       await new NotificationManager(this.database.db, this.vault).send(task.accountId, task.projectId, task.payload.channelId, `${account.name}: ${result.message}\n${result.url}`).catch(() => this.database.log("warn", "notification", "แจ้งเตือนล้มเหลว ผลงานยังคงเดิม"));
     } catch (error) {
-      const message = error instanceof AuthenticationError || error instanceof ActionBlockedError || error instanceof UncertainResultError || error instanceof ProfileBusyError || error instanceof RetryableBeforeSubmitError
+      const message = error instanceof AuthenticationError || error instanceof ActionBlockedError || error instanceof UncertainResultError || error instanceof ProfileBusyError || error instanceof RetryableBeforeSubmitError || error instanceof NetworkUnavailableError
         ? error.message : "งานไม่สำเร็จ กรุณาตรวจ Session และเครือข่าย";
       const retrying = !submitted && error instanceof RetryableBeforeSubmitError && tasks.retryBeforeSubmit(task, message);
       if (!retrying) tasks.finish(task, submitted || error instanceof UncertainResultError ? "uncertain" : "failed", submitted && !(error instanceof UncertainResultError) ? `${message} · ส่งคำสั่งแล้ว ห้ามส่งซ้ำก่อนตรวจ Facebook` : message);
       if (error instanceof AuthenticationError) this.database.setAccountStatus(task.accountId, "needs_login");
-      emit("target.failed", retrying ? `${message} · จะลองใหม่ ${task.attempts + 1}/${task.maxAttempts || 5}` : message);
-      await new NotificationManager(this.database.db, this.vault).send(task.accountId, task.projectId, task.payload.channelId, `${task.action}: ${message}`).catch(() => this.database.log("warn", "notification", "แจ้งเตือนงานล้มเหลวส่งไม่สำเร็จ"));
+      if (error instanceof NetworkUnavailableError) {
+        this.database.setAccountStatus(task.accountId, "paused");
+        new QueueSafety(this.database.db).holdOverdue();
+        this.database.db.prepare("UPDATE accounts SET status_message=? WHERE id=?").run(error.message, task.accountId);
+      }
+      if (FEATURES.groupPermissionCheck && error instanceof ActionBlockedError && /ไม่มีสิทธิ์|ไม่อนุญาต|ปิดความคิดเห็น|ไม่มีปุ่มแชร์/.test(message)) {
+        if (task.action === "post") updateGroupPermission(this.database.db, task.accountId, task.payload.targetUrl, "post", "denied", message);
+        if (task.action === "share") updateGroupPermission(this.database.db, task.accountId, task.payload.targetUrl, "share", "denied", message);
+      }
+       emit("target.failed", retrying ? `${message} · จะลองใหม่ ${task.attempts + 1}/${task.maxAttempts || 5}` : message);
+       this.database.log("error", "publisher", `${task.action} ไม่สำเร็จ: ${message}`, { taskId: task.id, submitted });
+       const delivery = await new NotificationManager(this.database.db, this.vault).send(task.accountId, task.projectId, task.payload.channelId,
+         `${task.action}: ${message}\nกลุ่ม: ${task.payload.targetUrl}${submitted || error instanceof UncertainResultError ? "\nผลไม่แน่ชัด กรุณาตรวจบน Facebook ก่อนส่งซ้ำ" : ""}`)
+         .catch(() => { this.database.log("warn", "notification", "แจ้งเตือนงานล้มเหลวส่งไม่สำเร็จ"); return undefined; });
+       if (notificationFailed(delivery)) emit("target.failed", `ส่ง Discord ไม่สำเร็จ — ${message}`);
+       if (Notification.isSupported()) new Notification({ title: "AutoPost ไม่สำเร็จ", body: `${task.action}: ${message}${notificationFailed(delivery) ? " (Discord ไม่ได้รับแจ้ง)" : ""}` }).show();
     } finally {
       this.activeAccounts.delete(task.accountId);
       emit("job.completed", "จบการทำงาน");

@@ -4,16 +4,22 @@ const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/g, " ").
 export function verifyPublishedPost(evidence: PublishedPostEvidence, expected: { destination: string; caption: string; accountName: string; userId?: string; mediaCount: number }, before: Set<string>): boolean {
   const identity = postIdentity(evidence.url);
   if (!identity || before.has(identity)) return false;
+  if (!expected.userId && !normalize(expected.accountName)) return false;
   const destination = new URL(expected.destination), url = new URL(evidence.url);
   const group = destination.pathname.match(/^\/groups\/([^/]+)/)?.[1];
   if (group && url.pathname.match(/^\/groups\/([^/]+)/)?.[1] !== group) return false;
-  if (expected.caption.trim() && !normalize(evidence.text).includes(normalize(expected.caption))) return false;
+  if (expected.caption.trim()) {
+    const expectedText = normalize(expected.caption), foundText = normalize(evidence.text);
+    const safeTruncatedPrefix = foundText.length >= 80 && expectedText.length > foundText.length && expectedText.startsWith(foundText.slice(0, 80));
+    if (!foundText.includes(expectedText) && !safeTruncatedPrefix) return false;
+  }
   if (expected.mediaCount && evidence.mediaCount < expected.mediaCount) return false;
   return evidence.authors.some(author => {
     if (expected.userId) {
       try {
         const profile = new URL(author.url);
-        if (profile.searchParams.get("id") === expected.userId || profile.pathname.split("/").includes(expected.userId)) return true;
+        if (/(^|\.)facebook\.com$/.test(profile.hostname) &&
+          (profile.searchParams.get("id") === expected.userId || profile.pathname.split("/").includes(expected.userId))) return true;
       } catch { /* Ignore invalid profile links. */ }
     }
     return !!normalize(expected.accountName) && normalize(author.name) === normalize(expected.accountName);

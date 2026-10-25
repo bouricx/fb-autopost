@@ -1,6 +1,6 @@
 {
   "name": "autopost-manager-th",
-  "version": "0.5.0",
+  "version": "0.6.10",
   "private": true,
   "description": "ตัวจัดการโพสต์ Facebook และ Discord แบบตั้งเวลา",
   "main": "out/main/main.js",

@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import type { Account, Destination } from "../shared/types";
 import type { AutomationTask } from "../../electron/automation/contracts";
 import { MediaPreview } from "./MediaPreview";
+import { FEATURES } from "../shared/features";
 
 export function ActionWorkspace({ action, accounts, destinations }: { action: "comment" | "share" | "like"; accounts: Account[]; destinations: Destination[] }) {
+  if (!FEATURES[action]) return <div className="panel fields"><h2>ฟีเจอร์ยังปิดใช้งาน</h2><p>ฟีเจอร์คอมเมนต์ / แชร์ / ไลค์ ยังปิดใช้งานอยู่ สามารถเปิดได้ภายหลัง</p></div>;
   const [enabled, setEnabled] = useState({ comment: action === "comment", share: action === "share", like: action === "like" });
   const [shareCaption, setShareCaption] = useState("");
   const [accountId, setAccountId] = useState(accounts.find(account => account.platform === "facebook")?.id || "");

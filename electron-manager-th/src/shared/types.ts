@@ -2,7 +2,7 @@ export type Platform = "facebook" | "discord";
 export type AdapterType = "facebook-browser" | "discord-webhook" | "discord-bot";
 export type AccountStatus = "active" | "needs_login" | "paused" | "rate_limited" | "error";
 export type DestinationKind = "facebook_group" | "facebook_page" | "facebook_profile" | "discord_channel" | "discord_webhook";
-export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "review_required" | "skipped" | "uncertain";
+export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "review_required" | "skipped" | "uncertain" | "pending_approval";
 
 export interface Account {
   id: string;
@@ -19,6 +19,11 @@ export interface Account {
   lastCheckedAt?: string | null;
   headless?: number;
   cookieManaged?: number;
+  facebookUserId?: string | null;
+  facebookName?: string | null;
+  facebookPhotoUrl?: string | null;
+  facebookActorType?: "profile" | "page" | "unknown";
+  facebookIdentityCheckedAt?: string | null;
 }
 
 export interface Destination {
@@ -77,6 +82,8 @@ export interface FacebookGroupInfo {
   name: string;
   url: string;
   imageUrl: string | null;
+  postPermission?: "unknown" | "allowed" | "denied";
+  sharePermission?: "unknown" | "allowed" | "denied";
 }
 
 export interface CreateAccountInput {
@@ -115,9 +122,13 @@ export interface AppApi {
   stopSchedule(id: string): Promise<void>;
   deleteFacebookGroup(accountId: string, groupId: string): Promise<boolean>;
   deleteQueueItem(kind: "post" | "workflow", id: string): Promise<boolean>;
+  cancelPendingQueueItems(items: { kind: "post" | "workflow"; id: string }[]): Promise<number | false>;
+  deletePendingQueueItems(input: { items: { kind: "post" | "workflow"; id: string }[]; scheduleId?: string }): Promise<number | false>;
   startActionWorkflow(input: { accountId: string; workflows: { action: "comment" | "share" | "like"; payload: unknown }[][] }): Promise<string[]>;
   startProjectPosts(input: { settings: import("../../electron/projects/project-manager").WorkspaceSettings; scheduledAt: string }): Promise<string[]>;
   listNotificationChannels(): Promise<{ id: string; name: string; type: string; accountId: string | null; projectId: string | null; enabled: number }[]>;
+  probeNotificationChannel(id: string): Promise<string>;
+  testNotificationDelivery(id: string): Promise<string>;
   createNotificationChannel(input: unknown): Promise<string>;
   deleteNotificationChannel(id: string): Promise<void>;
   listActions(): Promise<import("../../electron/automation/contracts").AutomationTask[]>;
@@ -135,8 +146,12 @@ export interface AppApi {
   previewMedia(paths: string[]): Promise<{ path: string; url: string | null; kind: "image" | "video"; missing: boolean }[]>;
   openMediaFolder(path: string): Promise<void>;
   previewCookies(input: string): Promise<{ userId: string; format: string }[]>;
-  importCookies(input: string): Promise<{ accountId: string; status: string; message: string }[]>;
-  checkSession(id: string): Promise<{ status: string; message: string }>;
+  importCookies(input: string, name?: string): Promise<{ accountId: string; status: string; message: string }[]>;
+  importCookieForAccount(id: string, input: string): Promise<{ accountId: string; status: string; message: string }>;
+  checkSession(id: string): Promise<import("../../electron/accounts/session-checker").SessionResult>;
+  loginAndCheckFacebook(id: string): Promise<import("../../electron/accounts/session-checker").SessionResult>;
+  createAndLoginFacebook(name: string): Promise<{ accountId: string; session: import("../../electron/accounts/session-checker").SessionResult }>;
+  renameAccount(id: string, name: string): Promise<Account>;
   deleteSession(id: string): Promise<void>;
   copyCookie(id: string): Promise<void>;
   exportSession(id: string, password: string): Promise<boolean>;

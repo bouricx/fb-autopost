@@ -4,6 +4,9 @@ import { migrateAutomationTasks } from "./migrations/004-automation-tasks";
 import { migrateJobDelay } from "./migrations/005-job-delay";
 import { migrateDailySchedules } from "./migrations/006-daily-schedules";
 import { migrateQueueSafety } from "./migrations/007-queue-safety";
+import { migrateGroupPermissions } from "./migrations/008-group-permissions";
+import { migrateFacebookIdentity } from "./migrations/009-facebook-identity";
+import type { VerifiedFacebookIdentity } from "../accounts/facebook-identity";
 import { idempotencyKey } from "./queue-safety";
 import { validateDelay } from "../../src/shared/delay";
 import { randomUUID } from "node:crypto";
@@ -89,6 +92,8 @@ export class AppDatabase {
     migrateJobDelay(this.db);
     migrateDailySchedules(this.db);
     migrateQueueSafety(this.db);
+    migrateGroupPermissions(this.db);
+    migrateFacebookIdentity(this.db);
     const workspace = this.db.prepare("SELECT id FROM workspaces LIMIT 1").get() as { id: string } | undefined;
     if (!workspace) {
       const workspaceId = randomUUID();
@@ -106,6 +111,8 @@ export class AppDatabase {
     return (this.db.prepare(`SELECT id,name,platform,adapter_type AS adapterType,status,
       browser_profile_path AS browserProfilePath,proxy_url AS proxyUrl,
       session_status AS sessionStatus,status_message AS statusMessage,last_checked_at AS lastCheckedAt,headless,
+      facebook_user_id AS facebookUserId,facebook_name AS facebookName,facebook_photo_url AS facebookPhotoUrl,
+      facebook_actor_type AS facebookActorType,facebook_identity_checked_at AS facebookIdentityCheckedAt,
       created_at AS createdAt,updated_at AS updatedAt FROM accounts ORDER BY created_at`).all()) as Account[];
   }
 
@@ -115,7 +122,9 @@ export class AppDatabase {
       session_status AS sessionStatus,status_message AS statusMessage,last_checked_at AS lastCheckedAt,
       CASE WHEN encrypted_cookies IS NULL THEN 0 ELSE headless END AS headless,
       CASE WHEN cookie_format IS NULL THEN 0 ELSE 1 END AS cookieManaged,
-      proxy_url AS proxyUrl,created_at AS createdAt,updated_at AS updatedAt FROM accounts WHERE id=?`).get(id) as
+       facebook_user_id AS facebookUserId,facebook_name AS facebookName,facebook_photo_url AS facebookPhotoUrl,
+       facebook_actor_type AS facebookActorType,facebook_identity_checked_at AS facebookIdentityCheckedAt,
+       proxy_url AS proxyUrl,created_at AS createdAt,updated_at AS updatedAt FROM accounts WHERE id=?`).get(id) as
       | (Account & { encryptedSecret: string | null })
       | undefined;
   }
@@ -136,6 +145,13 @@ export class AppDatabase {
     this.db.prepare("UPDATE accounts SET status=?,updated_at=? WHERE id=?").run(status, now(), id);
   }
 
+  renameAccount(id: string, name: string): Account {
+    const account = this.accountRecord(id);
+    if (!account) throw new Error("ไม่พบบัญชี");
+    this.db.prepare("UPDATE accounts SET name=?,updated_at=? WHERE id=?").run(name.trim(), now(), id);
+    return this.accountRecord(id)!;
+  }
+
   deleteAccount(id: string) { this.db.prepare("DELETE FROM accounts WHERE id=?").run(id); }
 
   sessionRecord(id: string) {
@@ -151,8 +167,16 @@ export class AppDatabase {
   }
 
   updateSessionStatus(id: string, status: string, message: string, checkedAt: string) {
+    const previous = this.db.prepare("SELECT status FROM accounts WHERE id=?").get(id) as { status: string } | undefined;
     this.db.prepare(`UPDATE accounts SET session_status=?,status_message=?,last_checked_at=?,status=?,updated_at=? WHERE id=?`)
-      .run(status, message, checkedAt, status === "online" ? "active" : "needs_login", now(), id);
+      .run(status, message, checkedAt, status === "online" ? previous?.status === "paused" ? "paused" : "active" : "needs_login", now(), id);
+  }
+
+  updateFacebookIdentity(id: string, identity: VerifiedFacebookIdentity | null, checkedAt: string) {
+    this.db.prepare(`UPDATE accounts SET facebook_user_id=?,facebook_name=?,facebook_photo_url=?,
+      facebook_actor_type=?,facebook_identity_checked_at=?,updated_at=? WHERE id=? AND platform='facebook'`)
+      .run(identity?.userId || null, identity?.name || null, identity?.photoUrl || null,
+        identity?.actorType || "unknown", identity ? checkedAt : null, now(), id);
   }
 
   setHeadless(id: string, enabled: boolean) {

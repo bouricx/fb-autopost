@@ -8,6 +8,10 @@ it("requires new identity, correct group, caption, author and media evidence", (
   expect(verifyPublishedPost({ ...evidence, text: "โพสต์อื่น" }, expected, new Set())).toBe(false);
   expect(verifyPublishedPost({ ...evidence, url: "https://www.facebook.com/groups/9/posts/2/" }, expected, new Set())).toBe(false);
   expect(verifyPublishedPost({ ...evidence, authors: [] }, expected, new Set())).toBe(false);
+  expect(verifyPublishedPost({ ...evidence, authors: [{ name: "บัญชี", url: "https://evil.example/profile.php?id=123" }] }, { ...expected, accountName: "" }, new Set())).toBe(false);
+  expect(verifyPublishedPost(evidence, { ...expected, userId: undefined, accountName: "" }, new Set())).toBe(false);
   expect(verifyPublishedPost({ ...evidence, mediaCount: 0 }, expected, new Set())).toBe(false);
+  expect(verifyPublishedPost({ ...evidence, text: "" }, expected, new Set())).toBe(false);
+  expect(verifyPublishedPost({ ...evidence, text: "ข้" }, expected, new Set())).toBe(false);
   expect(canonicalPostUrl(evidence.url)).toBe("https://www.facebook.com/groups/1/posts/2/");
 });
