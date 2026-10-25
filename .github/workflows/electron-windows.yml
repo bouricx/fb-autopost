@@ -24,7 +24,7 @@ jobs:
           cache-dependency-path: electron-manager-th/package-lock.json
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - run: npm test -- --maxWorkers 2
       - name: Build Windows installer
         run: npm run dist
         env:

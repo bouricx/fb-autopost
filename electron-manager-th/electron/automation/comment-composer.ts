@@ -19,12 +19,12 @@ export async function findCommentComposer(post: Locator, page: Page, timeout = 2
       for (let index = 0; index < await controls.count(); index++) {
         const control = controls.nth(index);
         if (await control.isVisible() && await control.isEnabled()) {
-          const clicked = await control.click({ timeout: 3000 }).then(() => true, () => false);
-          if (clicked) { opened = true; await page.waitForTimeout(900); break; }
+          const clicked = await control.click({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())) }).then(() => true, () => false);
+          if (clicked) { opened = true; break; }
         }
       }
     }
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(Math.max(0, Math.min(150, deadline - Date.now())));
   } while (Date.now() < deadline);
   throw new ActionBlockedError(opened ? "เปิดส่วนความคิดเห็นแล้ว แต่ยังไม่พบช่องพิมพ์ที่ใช้งานได้ อาจโหลดไม่เสร็จหรือรูปแบบ Facebook เปลี่ยน" : "ไม่พบช่องหรือปุ่มเปิดความคิดเห็นในโพสต์เป้าหมาย ยังไม่ยืนยันว่าโพสต์ปิดความคิดเห็น กรุณาตรวจสิทธิ์หรือรูปแบบหน้าเว็บ");
 }
