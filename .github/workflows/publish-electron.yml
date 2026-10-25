@@ -1,0 +1,50 @@
+name: Publish verified Electron installer
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Electron Windows build run ID
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify source build
+        id: source
+        shell: bash
+        run: |
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$REPOSITORY/actions/runs/$BUILD_RUN" > /tmp/build-run.json
+          jq -e '.conclusion == "success" and .head_branch == "main" and .path == ".github/workflows/electron-windows.yml"' /tmp/build-run.json
+          source_sha=$(jq -r .head_sha /tmp/build-run.json)
+          version=$(gh api "repos/$REPOSITORY/contents/electron-manager-th/package.json?ref=$source_sha" --jq .content | base64 -d | jq -r .version)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: AutoPost-Manager-TH-Windows
+          path: windows
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Publish installer and checksums
+        shell: bash
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          sha256sum windows/*.exe > SHA256SUMS.txt
+          gh release create "v$VERSION" windows/*.exe SHA256SUMS.txt \
+            --repo "$REPOSITORY" --target "$SOURCE_SHA" \
+            --title "AutoPost Manager TH $VERSION" \
+            --notes-file electron-manager-th/docs/RELEASE-0.6.11.md

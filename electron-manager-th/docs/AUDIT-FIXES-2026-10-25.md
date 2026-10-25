@@ -29,7 +29,7 @@
 
 - TypeScript: npm run typecheck ผ่าน
 - Electron build: npm run build ผ่าน (main/preload/renderer)
-- Electron: 37 test files / 111 tests ผ่าน รวม native SQLite integration, queue lifecycle, Discord mock network, shutdown, migration, project import/export, backup encryption และ browser DOM fixtures
+- Electron: 37 test files / 112 tests ผ่าน รวม native SQLite integration, queue lifecycle, Discord mock network, shutdown, migration, project import/export, backup encryption และ browser DOM fixtures
 - Python เดิม: unittest discover ผ่าน 19 tests
 - Python เดิม: check_ui.py ผ่าน account isolation/cache/images+fallback/search/selection/composer/themes/mobile
 - Electron renderer: สลับ 6 หน้าหลักที่ 800/1024/1440px ผ่าน ไม่มี page error หรือ document horizontal overflow ใช้ IPC จำลอง ไม่ใช่ Electron/Windows E2E
@@ -56,8 +56,8 @@ Node ใช้ better-sqlite3 native ABI; หลัง build installer ที่
 
 ## ยังตรวจยืนยันไม่ได้
 
-- ติดตั้ง/อัปเกรด/ถอนติดตั้ง EXE 0.6.10 บน Windows จริง; ยังไม่ได้สร้าง installer ใหม่
-- Windows autostart/Tray และ DPAPI จริง: ยังต้องตรวจบนเครื่องผู้ใช้; เพิ่ม Windows CI สำหรับ build NSIS และตรวจ packaged Electron ด้วย user data ชั่วคราวและโหมดห้ามโพสต์แล้ว ผล CI ต้องดูจาก run ของ commit นี้
+- ไฟล์ EXE 0.6.10 ที่อยู่ใน D: ไม่ได้ถูกตรวจ hash หรือเปิดบนเครื่องผู้ใช้; ยังไม่ได้ทดสอบ wizard ติดตั้ง/อัปเกรด/ถอนติดตั้งทุกขั้นตอน
+- Windows autostart/Tray และ DPAPI จริง: ยังต้องตรวจบนเครื่องผู้ใช้; เพิ่ม Windows CI สำหรับ build NSIS และตรวจ packaged Electron ด้วย user data ชั่วคราวและโหมดห้ามโพสต์แล้ว ผล Windows CI ผ่านแล้ว: https://github.com/bouricx/fb-autopost/actions/runs/40202234333
 - ล็อกอิน Facebook จริง, 2FA/checkpoint, selectors ทุก layout, ผลโพสต์/คอมเมนต์/แชร์/ไลก์จริง หรือ permission ของทุกกลุ่ม
 - ไม่ได้ส่ง Discord/Telegram/Facebook จริงระหว่างตรวจ
 - src/shared/features.ts ของ 0.6.10 ปิด comment/share/like/workflowFollowUp/pendingApprovalDetector/groupPermissionCheck ไว้ทั้งหมด คง flags ตาม upstream; ไม่เปิดฟีเจอร์ที่ยังไม่ได้ตรวจ live เพียงเพื่อให้ดูว่าครบ
@@ -68,3 +68,8 @@ Node ใช้ better-sqlite3 native ABI; หลัง build installer ที่
 ## Windows installer 0.6.11
 
 เพิ่ม .github/workflows/electron-windows.yml สำหรับ typecheck/tests/build NSIS และตรวจ packaged Electron ใน session-test mode โดยไม่ส่งโพสต์ ไฟล์ติดตั้งจะเป็น artifact ชื่อ AutoPost-Manager-TH-Windows เมื่อ job สำเร็จ ไม่ใช่การอัปเดตไฟล์ D: โดยอัตโนมัติ
+
+## ผล Windows รอบสุดท้าย
+
+Build commit 80fef6f: 112 tests, NSIS installer 0.6.11, packaged Electron startup/6 views/800px และ graceful exit ผ่านจริงบน Windows runner ไม่มีการส่งโพสต์ Windows workflow รุ่น Python เดิมผ่านที่ https://github.com/bouricx/fb-autopost/actions/runs/40201393127
+ระหว่างตรวจพบ quit reentry ค้างบน Windows และแก้ด้วยการรอ native event คลายก่อน quit ซ้ำ; สคริปต์ตรวจเก็บ process handle ก่อนปิด Playwright connection แล้ว
