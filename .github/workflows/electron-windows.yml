@@ -30,6 +30,7 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Verify packaged desktop with posting disabled
+        timeout-minutes: 4
         shell: pwsh
         run: |
           $env:AUTOPOST_EXE = Join-Path (Get-Location) 'dist/win-unpacked/AutoPost Manager TH.exe'
