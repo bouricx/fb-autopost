@@ -51,3 +51,12 @@ it("a closed share dialog without publication evidence remains uncertain, never 
  const f=await shareFixture('ambiguous');
  try {await expect(f.actions.execute('share',account,actionPayloadSchema.parse({targetUrl:'https://www.facebook.com/groups/222/',sourceUrl:'https://www.facebook.com/posts/555/',groupName:'Target group'}),vi.fn())).rejects.toThrow(/ยืนยันโพสต์ใหม่/);expect(f.submitted()).toBe(true);}finally{await f.context.close();}
 },30000);
+it("verifies a new comment using the Facebook name even when the local account label differs",async()=>{
+ const context=await browser.newContext();await context.addCookies([{name:'c_user',value:'123456',domain:'.facebook.com',path:'/'}]);const page=await context.newPage();
+ await context.route('**/*',route=>route.fulfill({contentType:'text/html',body:`<div role="article" id="post"><a href="/posts/555/">Original</a><button>Comment</button><div contenteditable="true" aria-label="Write a comment"></div></div><script>document.querySelector('[contenteditable]').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();const article=document.createElement('div');article.setAttribute('role','article');article.innerHTML='<a href="/alice">Alice</a><p>Local fixture comment</p><a href="/posts/555/?comment_id=999">now</a>';document.querySelector('#post').append(article);e.currentTarget.textContent='';}};</script>`}));
+ try {
+  const adapter={withActionPage:async(_a:Account,work:(page:Page)=>Promise<unknown>)=>work(page)} as unknown as FacebookBrowserAdapter;
+  const result=await new FacebookActions(adapter,process.env.TEMP||'/tmp').execute('comment',account,actionPayloadSchema.parse({targetUrl:'https://www.facebook.com/posts/555/',caption:'Local fixture comment'}),vi.fn());
+  expect(result.status).toBe('published');expect(result.url).toContain('comment_id=999');
+ }finally{await context.close();}
+},30000);

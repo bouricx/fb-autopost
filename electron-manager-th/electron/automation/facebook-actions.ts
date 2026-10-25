@@ -97,7 +97,7 @@ export class FacebookActions {
               return { newNode: node.getAttribute("data-autopost-existing") !== options.marker, authorMatches, text: clone.textContent || "",
                 mediaCount: [...node.querySelectorAll('img')].filter(image => image.closest('[role="article"]') === node && image.getBoundingClientRect().width >= 80 && image.getBoundingClientRect().height >= 80).length,
                 permalink: link?.href || null };
-            }), { marker, userId, name: account.name.replace(/\s+/g, " ").trim() });
+            }), { marker, userId, name: (account.facebookName || "").replace(/\s+/g, " ").trim() });
             const confirmed = evidence.filter(item => verifiedComment(item, payload.caption, payload.media.length > 0));
             if (confirmed.length === 1) return { status: "published" as const, url: confirmed[0].permalink || page.url(), message: "ตรวจพบความคิดเห็นใหม่ตรงข้อความ/รูปและบัญชีในโพสต์เป้าหมายแล้ว" };
             await page.waitForTimeout(500);
