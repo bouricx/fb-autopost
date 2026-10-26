@@ -31,6 +31,13 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
   with patch('autopost.browser_manager.inspect_session',new=AsyncMock(return_value=None)) as inspect:
    self.assertTrue(await self.manager.check(self.account['id']));inspect.assert_awaited_once()
   self.assertNotIn('fixture-only',str(self.manager.accounts()));self.manager.sessions.clear()
+ async def test_rejected_probe_preserves_checkpoint_reason_after_closing(self):
+  page=MagicMock();page.is_closed.return_value=False;ctx=AsyncMock();pw=AsyncMock()
+  self.manager.sessions[self.account['id']]=(pw,ctx,page)
+  with patch('autopost.browser_manager.inspect_session',new=AsyncMock(return_value='checkpoint_or_login_required')):
+   self.assertFalse(await self.manager.check(self.account['id']))
+  self.assertEqual(self.manager.status[self.account['id']],'checkpoint_or_login_required')
+  self.assertNotIn(self.account['id'],self.manager.sessions);ctx.close.assert_awaited_once()
  async def test_group_url_validation(self):
   for url in ['http://facebook.com/groups/123','https://facebook.com.evil.com/groups/123','https://facebook.com/groups/123/posts/45','https://user@facebook.com/groups/123']:
    with self.assertRaises(ValueError):self.manager.group_url(url)

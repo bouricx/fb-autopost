@@ -182,7 +182,9 @@ async def browser_action(aid: str,action: str):
     try:
         browsers.account(aid)
         if action=='login':await browsers.login(aid)
-        elif action=='check':return {'logged_in':await browsers.check(aid)}
+        elif action=='check':
+            online = await browsers.check(aid)
+            return {'logged_in':online,'reason':None if online else browsers.status.get(aid,'session_rejected')}
         elif action=='groups':return {'groups':await browsers.groups(aid)}
         elif action=='stop':await browsers.stop(aid)
         elif action=='close':await browsers.close(aid)

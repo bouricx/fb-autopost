@@ -127,9 +127,11 @@ class BrowserManager:
             if reason:
                 cfg = C.load_config(); A.find_account(cfg, aid)['cookie_blocked'] = True; C.save_config(cfg)
                 await self.close(aid)
+                self.status[aid] = reason
             return reason is None
-        except (ValueError, RuntimeError):
-            self.status[aid] = 'cookie_required / checkpoint_or_login_required'
+        except (ValueError, RuntimeError) as error:
+            code = str(error).split(' · ')[0]
+            self.status[aid] = code if code in ('cookie_required','checkpoint_or_login_required','session_rejected','secure_storage_unavailable','invalid_cookie') else 'session_rejected'
             return False
 
     async def groups(self,aid):
