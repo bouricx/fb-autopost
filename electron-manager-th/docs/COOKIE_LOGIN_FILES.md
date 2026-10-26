@@ -39,3 +39,4 @@ All paths are relative to the repository root. The full TypeScript module is [`e
 | `tests/test_cookie_login.py` | Tests / fixture verification |
 | `ui/app.js` | Account, authentication or UI integration |
 | `ui/index.html` | Account, authentication or UI integration |
+| `scripts/check_python_source.py` | Force embedded Windows runtime to verify checked-out source instead of the historical bundled app |

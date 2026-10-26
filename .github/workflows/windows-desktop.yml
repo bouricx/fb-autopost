@@ -14,7 +14,7 @@ jobs:
       - name: Verify Python source and DPAPI cookie fixtures
         shell: pwsh
         run: |
-          & "$env:RUNNER_TEMP/fb-desktop/FB-AutoPost/runtime/python.exe" -m unittest discover -s tests -v
+          & "$env:RUNNER_TEMP/fb-desktop/FB-AutoPost/runtime/python.exe" "$env:GITHUB_WORKSPACE/scripts/check_python_source.py"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify native window and occupied-port recovery
         shell: pwsh

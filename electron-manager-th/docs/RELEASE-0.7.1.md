@@ -10,7 +10,7 @@ Implemented in source, unit tests and local browser fixtures. **Live Facebook E2
 4. For an existing account, select it and use **เข้าด้วย cookie / เปลี่ยน Session**. Replacement must match the existing identity; there is no automatic replacement of another account.
 5. **ตรวจสอบสถานะ** decrypts the saved cookie and runs the same verification. Before posting/group discovery/actions, the adapter loads the encrypted cookie and obtains a verified context from the same module.
 
-A new browser context always runs `clearCookies()` before `addCookies()`. The persistent directory is `%LOCALAPPDATA%\FB-AutoPost\cookie-profiles\<c_user>`; non-Windows fallback is `~/.local/share/FB-AutoPost/cookie-profiles/<c_user>`. Legacy profile folders are not deleted. They are detached only when the user explicitly imports cookies for that account. Two app processes cannot use the same Chrome directory simultaneously.
+A new browser context always runs `clearCookies()` before `addCookies()`. The persistent directory is `%LOCALAPPDATA%\FB-AutoPost\cookie-profiles\<c_user>`; non-Windows fallback is `~/.local/share/FB-AutoPost/cookie-profiles/<c_user>`. Legacy profile folders are not deleted. Manual-only profiles are detached only when the user explicitly imports cookies. Existing encrypted-cookie accounts migrate when explicitly imported or checked. Two app processes cannot use the same Chrome directory simultaneously.
 
 รายการไฟล์ทั้งหมด: [COOKIE_LOGIN_FILES.md](COOKIE_LOGIN_FILES.md).
 
