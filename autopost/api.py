@@ -164,6 +164,19 @@ def saved_groups(aid: str):
     data['groups']=[row for raw in data['groups'] if (row:=normalize_group(raw))]
     return data
 
+@app.post('/api/browser/accounts/{aid}/cookie-login')
+async def browser_cookie_login(aid: str, request: Request):
+    try:
+        body = await request.json()
+        raw = body.get('cookie_raw') if isinstance(body, dict) else None
+        if not isinstance(raw, str) or not raw or len(raw) > 2_000_000:
+            raise ValueError('invalid_cookie')
+        return await browsers.cookie_login(aid, raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    except Exception:
+        raise HTTPException(400, 'cookie_login_failed') from None
+
 @app.post('/api/browser/accounts/{aid}/{action}')
 async def browser_action(aid: str,action: str):
     try:

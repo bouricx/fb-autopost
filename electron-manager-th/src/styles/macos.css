@@ -22,3 +22,5 @@ th{color:#506078;border-color:#d7dfea}td{color:#475870;border-color:#e1e6ef}td b
 @media(max-width:800px){.app-shell{grid-template-columns:166px minmax(0,1fr)}.nav{font-size:11px;gap:7px}.profile-form-grid{grid-template-columns:1fr}header{padding:18px;height:auto;min-height:90px}header h1{font-size:21px}.content{padding:14px}.panel{padding:16px}.brand{gap:7px;padding-left:0}.brand b{font-size:16px}.brand-mark{width:34px;height:34px}.brand span{font-size:10px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 .profile-workspace{border:0;padding:0;margin:0;min-width:0}.profile-workspace:disabled{opacity:.85}.profile-set label{min-width:0}.profile-run{overflow-wrap:anywhere}.profile-run>div{min-width:0}
+/* Cookie feedback can increase modal height; keep the submit and close controls reachable. */
+.modal{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain}.modal textarea{max-width:100%;min-height:120px}.modal-backdrop{padding:16px}

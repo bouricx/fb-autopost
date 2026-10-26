@@ -6,8 +6,8 @@ import { FacebookBrowserAdapter } from "./facebook-browser";
 export class AdapterRegistry {
   private readonly adapters = new Map<AdapterType, PlatformAdapter>();
 
-  constructor() {
-    for (const adapter of [new FacebookBrowserAdapter(), new DiscordWebhookAdapter(), new DiscordBotAdapter()]) {
+  constructor(cookieSession?: ConstructorParameters<typeof FacebookBrowserAdapter>[0]) {
+    for (const adapter of [new FacebookBrowserAdapter(cookieSession), new DiscordWebhookAdapter(), new DiscordBotAdapter()]) {
       this.adapters.set(adapter.type, adapter);
     }
   }

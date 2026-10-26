@@ -4,7 +4,9 @@ import secrets
 from datetime import datetime,timezone
 from urllib.parse import urlparse
 from . import config as C, fb_accounts as A, storage as S
-from .browser import launch_context,close_context
+from .browser import close_context
+from .cookie_login import login_with_cookies, inspect_session, cookie_profile_dir, parse_cookie_string, has_core_session
+from .cookie_vault import CookieVault
 from .group_metadata import EXTRACT_GROUPS, normalize_group
 
 class BrowserManager:
@@ -15,6 +17,7 @@ class BrowserManager:
         self.logs=[]
         self.account_lock=asyncio.Lock()
         self.status={}
+        self.cookie_vault=CookieVault()
 
     def log(self,account,text):
         self.logs.append({'time':datetime.now(timezone.utc).isoformat(),'account':account,'message':text})
@@ -42,37 +45,92 @@ class BrowserManager:
         if not a:raise ValueError('ไม่พบบัญชี')
         return a
 
-    async def session(self,aid):
-        self.account(aid)
-        if aid in self.sessions:
-            pw,ctx,page=self.sessions[aid]
-            if not page.is_closed():return page
+    async def cookie_login(self, aid, cookie_raw):
+        async with self.account_lock:
+            account = self.account(aid)
+            if self.tasks.get(aid) and not self.tasks[aid].done():
+                raise ValueError('หยุดงานและรอให้การส่งจบก่อนเปลี่ยน Cookie')
+            try:
+                parsed = parse_cookie_string(cookie_raw)
+            except ValueError:
+                return {'ok': False, 'reason': 'invalid_cookie'}
+            if not has_core_session(parsed):
+                return {'ok': False, 'reason': 'missing_c_user_or_xs'}
+            if account.get('cookie_user_id') and account['cookie_user_id'] != parsed['c_user']:
+                return {'ok': False, 'reason': 'session_rejected'}
+            cfg = C.load_config()
+            if any(a['id'] != aid and a.get('cookie_user_id') == parsed['c_user'] for a in cfg['fb_accounts']):
+                return {'ok': False, 'reason': 'session_rejected'}
             await self.close(aid)
-        # Only profiles inside this app are opened, never the user's normal Chrome profile.
-        pw,ctx=await launch_context(C.PROFILE_ROOT/aid)
-        page=ctx.pages[0] if ctx.pages else await ctx.new_page()
-        self.sessions[aid]=(pw,ctx,page)
-        self.status[aid]='เบราว์เซอร์เปิดอยู่'
-        return page
+            result = await login_with_cookies(cookie_raw)
+            if not result.ok:
+                A.find_account(cfg, aid)['cookie_blocked'] = True
+                C.save_config(cfg)
+                self.status[aid] = result.reason
+                return {'ok': False, 'reason': result.reason}
+            try:
+                # Save refreshed values with DPAPI only. Never store plaintext in config.
+                rows = await result.context.cookies('https://www.facebook.com/')
+                raw = '; '.join(row['name'] + '=' + row['value'] for row in rows)
+                self.cookie_vault.store(result.user_id, raw)
+            except Exception:
+                await result.close()
+                A.find_account(cfg, aid)['cookie_blocked'] = True; C.save_config(cfg)
+                self.status[aid] = 'secure_storage_unavailable'
+                return {'ok': False, 'reason': 'secure_storage_unavailable'}
+            current = A.find_account(cfg, aid)
+            current.update(cookie_user_id=result.user_id, cookie_blocked=False, dir=str(result.profile_dir))
+            C.save_config(cfg)
+            self.sessions[aid] = (result.playwright, result.context, result.page)
+            self.status[aid] = 'เข้าด้วย cookie สำเร็จ'
+            self.log(aid, 'ตรวจ Cookie และ Session สำเร็จ')
+            return {'ok': True, 'userId': result.user_id}
 
-    async def login(self,aid):
-        page=await self.session(aid)
-        await page.goto('https://www.facebook.com/',wait_until='domcontentloaded',timeout=60000)
-        await page.bring_to_front()
-        self.log(aid,'เปิด Facebook แล้ว ล็อกอินและยืนยันตัวตนบนหน้า Facebook เอง')
+    async def session(self, aid):
+        account = self.account(aid)
+        if account.get('cookie_blocked'):
+            raise ValueError('checkpoint_or_login_required · นำเข้า Cookie ใหม่ด้วยตนเอง')
+        if aid in self.sessions:
+            pw, ctx, page = self.sessions[aid]
+            if not page.is_closed():
+                return page
+            await self.close(aid)
+        user_id = account.get('cookie_user_id')
+        if not user_id:
+            raise ValueError('cookie_required · ใช้ปุ่มเข้าด้วย cookie')
+        raw = self.cookie_vault.load(user_id)
+        if parse_cookie_string(raw).get('c_user') != user_id:
+            raise ValueError('session_rejected')
+        result = await login_with_cookies(raw, user_data_dir=cookie_profile_dir(user_id))
+        if not result.ok:
+            cfg = C.load_config(); A.find_account(cfg, aid)['cookie_blocked'] = True; C.save_config(cfg)
+            self.status[aid] = result.reason
+            raise ValueError(result.reason)
+        try:
+            rows = await result.context.cookies('https://www.facebook.com/')
+            self.cookie_vault.store(user_id, '; '.join(row['name'] + '=' + row['value'] for row in rows))
+        except Exception:
+            await result.close()
+            cfg = C.load_config(); A.find_account(cfg, aid)['cookie_blocked'] = True; C.save_config(cfg)
+            raise ValueError('secure_storage_unavailable') from None
+        self.sessions[aid] = (result.playwright, result.context, result.page)
+        return result.page
 
-    async def check(self,aid):
-        if aid not in self.sessions:
-            self.status[aid]='กดล็อกอินเพื่อเปิดและตรวจบัญชี'
+    async def login(self, aid):
+        raise ValueError('manual_login_disabled · ใช้เข้าด้วย cookie')
+
+    async def check(self, aid):
+        try:
+            page = await self.session(aid)
+            reason = await inspect_session(page, self.sessions[aid][1], self.account(aid).get('cookie_user_id', ''))
+            self.status[aid] = reason or 'Session ใช้งานได้'
+            if reason:
+                cfg = C.load_config(); A.find_account(cfg, aid)['cookie_blocked'] = True; C.save_config(cfg)
+                await self.close(aid)
+            return reason is None
+        except (ValueError, RuntimeError):
+            self.status[aid] = 'cookie_required / checkpoint_or_login_required'
             return False
-        pw,ctx,page=self.sessions[aid]
-        if page.is_closed():
-            await self.close(aid);return False
-        cookies=await ctx.cookies('https://www.facebook.com/')
-        # Session indicator only; Facebook can still request verification on the next page.
-        found=any(c['name']=='c_user' and c.get('value') for c in cookies)
-        self.status[aid]='พบเซสชันล็อกอิน' if found else 'ยังไม่พบเซสชันล็อกอิน'
-        return found
 
     async def groups(self,aid):
         if self.tasks.get(aid) and not self.tasks[aid].done():raise ValueError('หยุดงานก่อนโหลดกลุ่ม')

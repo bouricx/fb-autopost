@@ -1,52 +1,71 @@
 import { clipboard, dialog } from "electron";
-import { chromium } from "playwright-core";
-import { randomUUID } from "node:crypto";
-import { rm, writeFile, readFile, stat, mkdir, readdir } from "node:fs/promises";
+import { rm, writeFile, readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { AppDatabase } from "../core/database";
 import { SecretVault } from "../core/secrets";
-import { CookieLogin } from "./cookie-login";
+import { CookieLogin, cookieProfileRoot } from "./cookie-login";
 import { parseCookies } from "./cookie-parser";
 import { SessionChecker } from "./session-checker";
 import { encryptBackup, decryptBackup } from "./portable-backup";
-import { isProfileBusy, ProfileBusyError } from "../core/errors";
 
 export class AccountManager {
   private busy = new Set<string>();
   private importing = false;
+  private cookieUsers = new Set<string>();
   constructor(private db: AppDatabase, private vault: SecretVault, private profiles: string, private checker: SessionChecker,
-    private closeAccount: (id: string) => Promise<void>) {}
+    private closeAccount: (id: string) => Promise<void>, private cookieProfiles = cookieProfileRoot()) {}
+
+  private profileFor(userId: string) {
+    if (!/^\d+$/.test(userId)) throw new Error("invalid_cookie");
+    return join(this.cookieProfiles, userId);
+  }
+
+  private async verifyAndSave(id: string, candidate: ReturnType<typeof parseCookies>[number], preservePause = false) {
+    const account = this.db.accountRecord(id);
+    if (!account || account.platform !== "facebook") throw new Error("ไม่พบบัญชี Facebook");
+    if (this.cookieUsers.has(candidate.userId)) throw new Error("บัญชี Cookie นี้กำลังตรวจสอบอยู่ กรุณารอ");
+    this.cookieUsers.add(candidate.userId);
+    try {
+    const duplicate = this.db.db.prepare("SELECT id FROM accounts WHERE platform='facebook' AND (facebook_user_id=? OR browser_profile_path=?) AND id<>? LIMIT 1").get(candidate.userId, this.profileFor(candidate.userId), id);
+    if (duplicate) throw new Error("Facebook นี้อยู่ในบัญชีอื่นแล้ว");
+    const profile = this.profileFor(candidate.userId);
+    const result = await new CookieLogin(this.vault, this.checker).verify(candidate, profile, !!account.headless, account.proxyUrl || undefined);
+    // Explicit cookie replacement is the only migration; legacy profiles remain on disk untouched.
+    this.db.db.prepare("UPDATE accounts SET browser_profile_path=? WHERE id=?").run(profile, id);
+    this.db.saveSession(id, result.encryptedCookies, result.format, result.session.status, result.session.message, result.session.checkedAt);
+    this.db.updateFacebookIdentity(id, result.session.status === "online" ? result.session.identity || null : null, result.session.checkedAt);
+    this.db.db.prepare("UPDATE accounts SET facebook_user_id=? WHERE id=?").run(candidate.userId, id);
+    if (preservePause && account.status === "paused" && result.session.status === "online") this.db.setAccountStatus(id, "paused");
+    return { accountId: id, status: result.session.status, message: result.session.message, reason: result.session.reason };
+    } finally { this.cookieUsers.delete(candidate.userId); }
+  }
 
   async importMultipleCookies(input: string, progress?: (event: { current: number; total: number; status: string }) => void, name?: string) {
     if (this.importing) throw new Error("กำลังนำเข้า Cookie กรุณารอสักครู่");
     const candidates = parseCookies(input);
     this.importing = true;
-    const results: { accountId: string; status: string; message: string }[] = [];
+    const results: { accountId: string; status: string; message: string; reason?: string }[] = [];
     try {
       for (const candidate of candidates) {
         progress?.({ current: results.length + 1, total: candidates.length, status: "checking" });
-        const existing = this.db.db.prepare("SELECT id FROM accounts WHERE platform='facebook' AND facebook_user_id=? ORDER BY created_at LIMIT 1")
-          .get(candidate.userId) as { id: string } | undefined;
-        if (existing) throw new Error("บัญชี Facebook นี้มีอยู่แล้ว กรุณาตรวจสอบ Session ในบัญชีเดิม ไม่สร้างซ้ำหรือทับ Cookie");
-        const unverified = this.db.db.prepare("SELECT id FROM accounts WHERE platform='facebook' AND name=? AND facebook_user_id IS NULL ORDER BY created_at LIMIT 1")
-          .get(`Facebook ${candidate.userId}`) as { id: string } | undefined;
-        if (unverified) throw new Error("พบบัญชี Facebook เดิมที่ยังไม่ยืนยันชื่อ กรุณาตรวจบัญชีเดิมก่อนนำเข้าใหม่");
-        const profile = join(this.profiles, randomUUID());
-        const account = this.db.createAccount({ name: name && candidates.length === 1 ? name : `Facebook ${candidate.userId}`, adapterType: "facebook-browser" }, null, profile);
-        this.db.saveSession(account.id, this.vault.encryptCookies(JSON.stringify(candidate.cookies)), candidate.format, "unknown", "รอตรวจสอบ Session", new Date().toISOString());
-        try {
-          const result = await new CookieLogin(this.vault, this.checker).verify(candidate, profile);
-          this.db.saveSession(account.id, result.encryptedCookies, result.format, result.session.status, result.session.message, result.session.checkedAt);
-          this.db.updateFacebookIdentity(account.id, result.session.status === "online" ? result.session.identity || null : null, result.session.checkedAt);
-          results.push({ accountId: account.id, status: result.session.status, message: result.session.message });
-          progress?.({ current: results.length, total: candidates.length, status: result.session.status });
-          if (["checkpoint", "restricted", "disabled"].includes(result.session.status)) break;
-        } catch {
-          const message = "เปิด Session ไม่สำเร็จ กรุณาตรวจ Chrome และเครือข่าย";
-          this.db.updateSessionStatus(account.id, "unknown", message, new Date().toISOString());
-          results.push({ accountId: account.id, status: "unknown", message });
-          progress?.({ current: results.length, total: candidates.length, status: "unknown" });
+        const profile = this.profileFor(candidate.userId);
+        let existing = this.db.db.prepare("SELECT id FROM accounts WHERE platform='facebook' AND (facebook_user_id=? OR browser_profile_path=?) ORDER BY created_at LIMIT 1")
+          .get(candidate.userId, profile) as { id: string } | undefined;
+        if (!existing) {
+          const legacy = this.db.db.prepare("SELECT id,encrypted_cookies AS encryptedCookies FROM accounts WHERE platform='facebook' AND facebook_user_id IS NULL AND encrypted_cookies IS NOT NULL").all() as { id: string; encryptedCookies: string }[];
+          const matches = legacy.filter(row => {
+            try { return parseCookies(this.vault.decrypt(row.encryptedCookies) || "")[0]?.userId === candidate.userId; }
+            catch { return false; }
+          });
+          if (matches.length > 1) throw new Error("พบ Session เดิมซ้ำ กรุณาเลือกบัญชีที่ต้องการเปลี่ยน Cookie");
+          existing = matches[0];
         }
+        const account = existing || this.db.createAccount({ name: name && candidates.length === 1 ? name : `Facebook ${candidate.userId}`, adapterType: "facebook-browser" }, null, profile);
+        const result = await this.exclusive(account.id, () => this.verifyAndSave(account.id, candidate));
+        results.push(result);
+        progress?.({ current: results.length, total: candidates.length, status: result.status });
+        // A rejected login never initiates another attempt or the next account in this batch.
+        if (result.status !== "online") break;
       }
       return results;
     } finally { this.importing = false; }
@@ -57,31 +76,14 @@ export class AccountManager {
     if (!candidate || extra.length) throw new Error("กรุณาใช้ Cookie ของบัญชีเดียวสำหรับบัญชีที่เลือก");
     return this.exclusive(id, async () => {
       const account = this.db.accountRecord(id);
-      if (!account?.browserProfilePath || account.platform !== "facebook") throw new Error("ไม่พบบัญชี Facebook");
-      if (account.facebookUserId && account.facebookUserId !== candidate.userId) throw new Error("Cookie เป็นคนละบัญชีกับ Facebook ที่ยืนยันไว้ ไม่เปลี่ยน Session");
-      const duplicate = this.db.db.prepare("SELECT id FROM accounts WHERE platform='facebook' AND facebook_user_id=? AND id<>? LIMIT 1")
-        .get(candidate.userId, id);
-      if (duplicate) throw new Error("Facebook นี้อยู่ในบัญชีอื่นแล้ว ไม่สร้าง Session ซ้ำ");
-      const existing = this.db.sessionRecord(id);
-      if (existing?.encryptedCookies) throw new Error("บัญชีนี้มี Cookie อยู่แล้ว ไม่ทับ Session เดิม กรุณาใช้การตรวจ Session");
-      // Verify in an isolated temporary profile before attaching any credential to the selected account.
-      const scratch = join(this.profiles, randomUUID());
-      let result;
-      try { result = await new CookieLogin(this.vault, this.checker).verify(candidate, scratch); }
-      finally { await rm(scratch, { recursive: true, force: true }).catch(() => undefined); }
-      if (result.session.status !== "online") throw new Error(`ยืนยัน Cookie ไม่สำเร็จ: ${result.session.message} ไม่เปลี่ยนบัญชีเดิม`);
-      // Existing Chrome profiles must never be silently overwritten with cookie credentials.
-      if ((await readdir(account.browserProfilePath).catch(error => {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw new Error("ตรวจโฟลเดอร์โปรไฟล์ไม่ได้ ไม่เปลี่ยน Cookie");
-      })).length) {
-        throw new Error("บัญชีนี้มีโปรไฟล์ Chrome อยู่แล้ว ไม่ทับด้วย Cookie กรุณาเข้าสู่ระบบ Chrome หรือสร้างบัญชีใหม่");
-      }
-      await mkdir(account.browserProfilePath, { recursive: true });
-      const stored = await new CookieLogin(this.vault, this.checker).verify(candidate, account.browserProfilePath);
-      this.db.saveSession(id, stored.encryptedCookies, stored.format, stored.session.status, stored.session.message, stored.session.checkedAt);
-      this.db.updateFacebookIdentity(id, stored.session.status === "online" ? stored.session.identity || null : null, stored.session.checkedAt);
-      return { accountId: id, status: stored.session.status, message: stored.session.message };
+      if (!account || account.platform !== "facebook") throw new Error("ไม่พบบัญชี Facebook");
+      if (account.facebookUserId && account.facebookUserId !== candidate.userId) throw new Error("Cookie เป็นคนละบัญชี ไม่เปลี่ยน Session");
+      const saved = this.db.sessionRecord(id)?.encryptedCookies;
+      if (saved && parseCookies(this.vault.decrypt(saved) || "")[0]?.userId !== candidate.userId) throw new Error("Cookie เป็นคนละบัญชี ไม่เปลี่ยน Session");
+      const duplicate = this.db.db.prepare("SELECT id FROM accounts WHERE platform='facebook' AND (facebook_user_id=? OR browser_profile_path=?) AND id<>? LIMIT 1")
+        .get(candidate.userId, this.profileFor(candidate.userId), id);
+      if (duplicate) throw new Error("Facebook นี้อยู่ในบัญชีอื่นแล้ว");
+      return this.verifyAndSave(id, candidate);
     });
   }
 
@@ -93,50 +95,26 @@ export class AccountManager {
 
   async checkSession(id: string) {
     return this.exclusive(id, async () => {
-      const account = this.db.accountRecord(id);
-      const session = this.db.sessionRecord(id);
-      if (!account?.browserProfilePath || !session) throw new Error("ไม่พบ Session Facebook");
-      const context = await chromium.launchPersistentContext(account.browserProfilePath, { channel: "chrome", headless: !!session.headless, locale: "th-TH", timezoneId: "Asia/Bangkok" }).catch(error => {
-        if (isProfileBusy(error)) throw new ProfileBusyError();
-        throw new Error("เปิด Chrome เพื่อตรวจ Session ไม่สำเร็จ กรุณาตรวจ Chrome และ Proxy");
-      });
-      try {
-        const result = await this.checker.check(context, account.facebookUserId || undefined);
+      const stored = this.db.sessionRecord(id)?.encryptedCookies;
+      if (!stored) {
+        const result = { status: "expired" as const, reason: "missing_c_user_or_xs", message: "ยังไม่มี Cookie กรุณากดเข้าด้วย cookie", checkedAt: new Date().toISOString() };
         this.db.updateSessionStatus(id, result.status, result.message, result.checkedAt);
-        this.db.updateFacebookIdentity(id, result.status === "online" ? result.identity || null : null, result.checkedAt);
         return result;
-      } finally { await context.close(); }
+      }
+      const [candidate, ...others] = parseCookies(this.vault.decrypt(stored) || "");
+      if (!candidate || others.length) throw new Error("invalid_cookie");
+      const account = this.db.accountRecord(id);
+      if (account?.facebookUserId && account.facebookUserId !== candidate.userId) throw new Error("Cookie เป็นคนละบัญชี ไม่เริ่ม Session");
+      const result = await this.verifyAndSave(id, candidate, true);
+      return { status: result.status as import("./session-checker").SessionStatus, reason: result.reason, message: result.message, checkedAt: new Date().toISOString() };
     });
   }
 
-  async loginWithBrowser(id: string) {
-    const account = this.db.accountRecord(id);
-    if (!account?.browserProfilePath || account.platform !== "facebook") throw new Error("ไม่พบบัญชี Facebook");
-    if (this.db.hasRunningJobs(id) || this.busy.has(id)) throw new Error("บัญชีกำลังทำงาน กรุณาหยุดคิวก่อนล็อกอิน");
-    this.busy.add(id);
-    try {
-      await this.closeAccount(id);
-      await mkdir(account.browserProfilePath, { recursive: true });
-      const context = await chromium.launchPersistentContext(account.browserProfilePath, { channel: "chrome", headless: false,
-        locale: "th-TH", timezoneId: "Asia/Bangkok" }).catch(error => {
-        if (isProfileBusy(error)) throw new ProfileBusyError();
-        throw new Error("เปิด Chrome ไม่สำเร็จ กรุณาตรวจการติดตั้ง Chrome");
-      });
-      try {
-        const page = context.pages()[0] || await context.newPage();
-        await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 60_000 });
-        await page.bringToFront();
-        await context.waitForEvent("close");
-      } finally { await context.close().catch(() => undefined); }
-    } finally { this.busy.delete(id); }
-    return this.checkSession(id);
+  async loginWithBrowser(_id: string): Promise<import("./session-checker").SessionResult> {
+    throw new Error("manual_login_disabled · ใช้ปุ่มเข้าด้วย cookie และนำเข้า Session ใหม่");
   }
-
-  async createAndLoginWithBrowser(name: string) {
-    const profile = join(this.profiles, randomUUID());
-    const account = this.db.createAccount({ name, adapterType: "facebook-browser" }, null, profile);
-    const session = await this.loginWithBrowser(account.id);
-    return { accountId: account.id, session };
+  async createAndLoginWithBrowser(_name: string): Promise<{ accountId: string; session: import("./session-checker").SessionResult }> {
+    throw new Error("manual_login_disabled · สร้างบัญชีผ่านการนำเข้า Cookie");
   }
 
   private cookie(id: string): string {
@@ -180,7 +158,7 @@ export class AccountManager {
       if (answer.response !== 1) return;
       if (account.browserProfilePath) {
         const profile = resolve(account.browserProfilePath);
-        if (dirname(profile) !== resolve(this.profiles)) throw new Error("Profile อยู่นอกโฟลเดอร์ที่อนุญาต ไม่ดำเนินการลบ");
+        if (![resolve(this.profiles), resolve(this.cookieProfiles)].includes(dirname(profile))) throw new Error("Profile อยู่นอกโฟลเดอร์ที่อนุญาต ไม่ดำเนินการลบ");
         await rm(profile, { recursive: true, force: true });
       }
       this.db.deleteAccount(id);

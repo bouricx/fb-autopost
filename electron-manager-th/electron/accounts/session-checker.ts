@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { inspectFacebookIdentity, type VerifiedFacebookIdentity } from "./facebook-identity";
 
 export type SessionStatus = "online" | "expired" | "restricted" | "checkpoint" | "disabled" | "unknown";
-export interface SessionResult { status: SessionStatus; message: string; checkedAt: string; screenshot?: string; identity?: VerifiedFacebookIdentity | null }
+export interface SessionResult { reason?: string; status: SessionStatus; message: string; checkedAt: string; screenshot?: string; identity?: VerifiedFacebookIdentity | null }
 
 export class SessionChecker {
   constructor(private readonly screenshotsDir: string) {}
@@ -29,11 +29,13 @@ export class SessionChecker {
     return result;
   }
 
-  private async inspect(page: Page, context: BrowserContext, userId?: string): Promise<SessionResult> {
+  async inspect(page: Page, context: BrowserContext, userId?: string): Promise<SessionResult> {
     const checkedAt = new Date().toISOString();
     const url = new URL(page.url());
     if (!/(^|\.)facebook\.com$/.test(url.hostname)) return { status: "unknown", message: "หน้าเว็บไม่ได้อยู่บน Facebook", checkedAt };
-    if (/checkpoint|challenge/.test(url.pathname)) return { status: "checkpoint", message: "ต้องยืนยันตัวตนด้วยตนเอง กรุณาเปิด Chrome แบบเห็นหน้าต่าง", checkedAt };
+    if (/checkpoint|challenge/.test(url.pathname)) return { status: "checkpoint", message: "ต้องยืนยันตัวตนด้วยตนเอง หยุดงานและให้เจ้าของบัญชีดำเนินการบน Facebook เอง", checkedAt };
+    if (/\/(?:login|two_step_verification)(?:\/|$|\.php)/.test(url.pathname)) return { status: "expired", reason: "checkpoint_or_login_required", message: "checkpoint_or_login_required · หยุดและนำเข้า Cookie ใหม่", checkedAt };
+    if (await page.locator('iframe[src*="captcha"],input[name*="captcha"]').first().isVisible().catch(() => false)) return { status: "checkpoint", reason: "checkpoint_or_login_required", message: "พบ CAPTCHA หยุดและให้เจ้าของบัญชีดำเนินการเอง", checkedAt };
     const heading = await page.locator('h1,h2,[role="alert"]').allTextContents();
     const text = heading.join(" ");
     if (/account.{0,30}disabled|บัญชี.{0,30}ถูกปิดใช้งาน/i.test(text)) return { status: "disabled", message: "Facebook แจ้งว่าบัญชีถูกปิดใช้งาน", checkedAt };
@@ -43,7 +45,7 @@ export class SessionChecker {
     const identity = cookies.find(cookie => cookie.name === "c_user");
     const accountControl = page.getByRole("button", { name: /Your profile|Account|โปรไฟล์ของคุณ|บัญชีของคุณ/i }).first();
     if (identity && userId && identity.value !== userId) return { status: "unknown", message: "Session เป็นคนละบัญชี ไม่เริ่มงานอัตโนมัติ", checkedAt };
-    if (identity && await accountControl.isVisible().catch(() => false)) {
+    if (identity && cookies.some(cookie => cookie.name === "xs" && cookie.value) && await accountControl.isVisible().catch(() => false)) {
       const verified = await inspectFacebookIdentity(page, context, identity.value).catch(() => null);
       return { status: "online", message: "ตรวจพบ Session และเมนูบัญชีที่ล็อกอินแล้ว", checkedAt, identity: verified };
     }

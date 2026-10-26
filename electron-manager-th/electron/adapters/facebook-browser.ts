@@ -1,10 +1,11 @@
+import type { CookieLoginResult } from "../accounts/cookie-login";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { Account } from "../../src/shared/types";
 import type { FacebookGroupInfo } from "../../src/shared/types";
 import type { PlatformAdapter, PublishContext, PublishResult } from "./types";
-import { AuthenticationError, isProfileBusy, ProfileBusyError } from "../core/errors";
+import { AuthenticationError, ProfileBusyError } from "../core/errors";
 import { RetryableBeforeSubmitError, UncertainResultError } from "../automation/contracts";
 import { postIdentity } from "../automation/post-target";
 import { canonicalPostUrl, verifyPublishedPost } from "../automation/published-post";
@@ -32,6 +33,7 @@ async function firstVisible(candidates: Locator[]): Promise<Locator | null> {
 
 export class FacebookBrowserAdapter implements PlatformAdapter {
   readonly type = "facebook-browser" as const;
+  constructor(private readonly cookieSession?: (account: Account) => Promise<CookieLoginResult>) {}
   private contexts = new Map<string, BrowserContext>();
   private launching = new Set<string>();
 
@@ -45,21 +47,14 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
     const existing = this.contexts.get(account.id);
     if (existing) return existing;
     if (this.launching.has(account.id)) throw new ProfileBusyError();
-    if (!account.browserProfilePath) throw new Error("ไม่พบโฟลเดอร์ Chrome profile");
-    const proxy = account.proxyUrl ? { server: account.proxyUrl } : undefined;
+    if (!account.cookieManaged || !this.cookieSession) throw new AuthenticationError("cookie_required · กรุณาเข้าด้วย cookie ก่อนเริ่มงาน");
     this.launching.add(account.id);
     let context: BrowserContext;
-    try { context = await chromium.launchPersistentContext(account.browserProfilePath, {
-      channel: "chrome",
-      headless: visible ? false : !!account.headless,
-      proxy,
-      viewport: { width: 1365, height: 900 },
-      locale: "th-TH",
-      timezoneId: "Asia/Bangkok",
-      args: ["--disable-notifications"],
-    }); } catch (error) {
-      if (isProfileBusy(error)) throw new ProfileBusyError();
-      throw error;
+    try {
+      const session = await this.cookieSession({ ...account, headless: visible ? 0 : account.headless });
+      if (!session.ok) throw new AuthenticationError(session.reason);
+      context = session.context;
+      await session.page.close().catch(() => undefined);
     } finally { this.launching.delete(account.id); }
     context.setDefaultTimeout(20_000);
     this.contexts.set(account.id, context);
@@ -67,11 +62,8 @@ export class FacebookBrowserAdapter implements PlatformAdapter {
     return context;
   }
 
-  async openLogin(account: Account): Promise<void> {
-    const context = await this.context(account, true);
-    const page = context.pages()[0] || await context.newPage();
-    await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded" });
-    await page.bringToFront();
+  async openLogin(_account: Account): Promise<void> {
+    throw new AuthenticationError("manual_login_disabled · กรุณาใช้เข้าด้วย cookie");
   }
 
   async withActionPage<T>(account: Account, action: (page: Page) => Promise<T>): Promise<T> {

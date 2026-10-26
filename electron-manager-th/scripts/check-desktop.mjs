@@ -25,7 +25,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.getByRole('heading', { name: 'ภาพรวม', exact: true }).waitFor();
   console.log('Renderer ready');
-  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.7.0');
+  assert.equal(await application.evaluate(({ app }) => app.getVersion()), '0.7.1');
   assert.deepEqual(await page.evaluate(() => window.autopost.listAccounts()), []);
   assert.equal((await page.evaluate(() => window.autopost.workerStatus())).running, false);
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(800, 700));
@@ -46,6 +46,18 @@ try {
   assert.equal((await page.evaluate(()=>window.autopost.listMessageProfiles()))[0].sets.length,2);
   await page.locator('.content').evaluate(node=>node.scrollTop=0);
   await page.screenshot({ path: join(output, 'desktop-profiles.png'), fullPage: true });
+  await page.locator('nav').getByRole('button',{name:'1. บัญชีและปลายทาง',exact:true}).click();
+  await page.getByRole('button',{name:'เพิ่มบัญชี',exact:true}).click();
+  await page.getByRole('button',{name:'เข้าด้วย cookie',exact:true}).click();
+  await page.getByRole('heading',{name:'เข้าด้วย cookie',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'เปิด Chrome เพื่อล็อกอิน',exact:true}).count(),0);
+  await page.getByRole('textbox',{name:'Cookie string / Cookie-Editor JSON'}).fill('c_user=123456');
+  await page.getByRole('button',{name:'เข้าด้วย cookie',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'missing_c_user_or_xs'}).waitFor();
+  assert.equal(await page.getByRole('textbox',{name:'Cookie string / Cookie-Editor JSON'}).inputValue(),'');
+  assert.equal((await page.evaluate(()=>window.autopost.listAccounts())).length,0);
+  await page.screenshot({path:join(output,'desktop-cookie-login.png'),fullPage:true});
+
   assert.deepEqual(errors, []);
   console.log('Packaged Windows desktop passed: isolated data, session-test mode, queue disabled, eight navigation views and native profile save IPC, small window. No social actions sent.');
 } finally {

@@ -25,3 +25,20 @@ release-*/
 *session*.json
 relocation-manifest.json
 desktop.ini
+
+# Private browser credentials stay local, including custom data roots.
+cookie-profiles/
+cookie-secrets/
+fb_profile/
+*cookie*.txt
+*cookies*.json
+*cookie*.bin
+*token*.json
+*token*.txt
+
+# Chromium state in any accidentally selected custom profile directory.
+**/Default/
+**/Local State
+**/Singleton*
+**/Cookies
+**/Cookies-journal

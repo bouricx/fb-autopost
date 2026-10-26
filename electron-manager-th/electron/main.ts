@@ -1,3 +1,4 @@
+import { openCookieSession, cookieProfileDir } from "./accounts/cookie-login";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell, protocol, net, screen } from "electron";
 import { pathToFileURL } from "node:url";
 import { readFile, writeFile, stat, readdir } from "node:fs/promises";
@@ -376,14 +377,7 @@ function registerIpc(profilesDir: string) {
     return database.createAccount(input, vault.encrypt(input.secret), input.adapterType === "facebook-browser" ? idPath : null);
   });
   ipcMain.handle("accounts:delete", (_event, id: string) => database.deleteAccount(z.string().uuid().parse(id)));
-  ipcMain.handle("accounts:login-facebook", async (_event, id: string) => {
-    const account = database.accountRecord(z.string().uuid().parse(id));
-    if (!account || account.adapterType !== "facebook-browser") throw new Error("ไม่พบบัญชี Facebook");
-    if (queue.status().running || database.hasRunningJobs(account.id)) throw new Error("กรุณาหยุดระบบคิวและรอให้งานจบก่อนเปิดหน้าล็อกอิน");
-    database.setAccountStatus(account.id, "needs_login");
-    await adapters.get("facebook-browser").openLogin?.(account);
-    // Opening a browser is not proof of authentication. Status changes only after SessionChecker verifies it.
-  });
+  ipcMain.handle("accounts:login-facebook", () => { throw new Error("manual_login_disabled · ใช้เข้าด้วย cookie"); });
   ipcMain.handle("accounts:discover-groups", async (_event, id: string) => {
     const account = database.accountRecord(z.string().uuid().parse(id));
     if (!account || account.adapterType !== "facebook-browser") throw new Error("ไม่พบบัญชี Facebook");
@@ -466,7 +460,23 @@ app.whenReady().then(() => {
   mkdirSync(profilesDir, { recursive: true });
   database = new AppDatabase(join(dataDir, "autopost.sqlite3"));
   vault = new SecretVault();
-  adapters = new AdapterRegistry();
+  adapters = new AdapterRegistry(async account => {
+    const encrypted = database.sessionRecord(account.id)?.encryptedCookies;
+    if (!encrypted) return { ok: false, reason: "missing_c_user_or_xs" };
+    const candidates = parseCookies(vault.decrypt(encrypted) || "");
+    if (candidates.length !== 1) return { ok: false, reason: "invalid_cookie" };
+    const candidate = candidates[0];
+    if (account.facebookUserId !== candidate.userId || resolve(account.browserProfilePath || "") !== resolve(cookieProfileDir(candidate.userId))) return { ok: false, reason: "session_rejected" };
+    const result = await openCookieSession(candidate.cookies, candidate.userId, { userDataDir: account.browserProfilePath!, headless: !!account.headless,
+      proxy: account.proxyUrl ? { server: account.proxyUrl } : undefined });
+    if (result.ok) {
+      try {
+        const encrypted = vault.encryptCookies(JSON.stringify(await result.context.cookies("https://www.facebook.com/")));
+        database.db.prepare("UPDATE accounts SET encrypted_cookies=? WHERE id=?").run(encrypted, account.id);
+      } catch { await result.context.close(); return { ok: false, reason: "session_rejected" }; }
+    }
+    return result;
+  });
   queue = new QueueEngine(database, adapters, vault, screenshotsDir, 2, progressBus);
   registerIpc(profilesDir);
   createWindow();

@@ -20,7 +20,7 @@ function normalize(input: Record<string, unknown>): SessionCookie {
   if (!name || /[;\s=]/.test(name) || typeof input.value !== "string") throw new Error("รูปแบบ Cookie ไม่ถูกต้อง");
   return { name, value: input.value, domain, path: String(input.path || "/"),
     secure: same === "none" || same === "no_restriction" || input.secure !== false,
-    httpOnly: input.httpOnly === true, sameSite: same === "strict" ? "Strict" : ["none", "no_restriction"].includes(same) ? "None" : "Lax",
+    httpOnly: ["xs", "c_user", "datr", "sb"].includes(name) || input.httpOnly === true, sameSite: same === "strict" ? "Strict" : ["none", "no_restriction"].includes(same) ? "None" : "Lax",
     expires: Number.isFinite(expiration) && expiration > 0 ? expiration : -1 };
 }
 
@@ -31,8 +31,9 @@ export function parseCookies(input: string): CookieCandidate[] {
   const append = (rows: Record<string, unknown>[], format: CookieCandidate["format"]) => {
     const cookies = rows.map(normalize);
     const identities = [...new Set(cookies.filter(c => c.name === "c_user").map(c => c.value))];
+    if (!identities.length) throw new Error("missing_c_user_or_xs · ไม่พบ c_user");
     if (identities.length !== 1 || !/^\d+$/.test(identities[0])) throw new Error("แต่ละชุดต้องมี c_user ของบัญชีเดียว ใช้ ---ACCOUNT--- คั่นบัญชี");
-    if (!cookies.some(c => c.name === "xs" && c.value)) throw new Error("ไม่พบ xs สำหรับ Session");
+    if (!cookies.some(c => c.name === "xs" && c.value)) throw new Error("missing_c_user_or_xs · ไม่พบ xs สำหรับ Session");
     output.push({ userId: identities[0], cookies, format });
   };
   for (const block of input.trim().split(/\r?\n\s*---ACCOUNT---\s*\r?\n/)) {

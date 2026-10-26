@@ -1,3 +1,17 @@
+# Current: 0.7.1 — Cookie-first Facebook login
+
+Cookie login replaces manual Chrome login across account creation, session checks, discovery and the send adapter. Canonical per-c_user profiles, clear-before-inject, encrypted local storage, explicit cookie refresh and fail-closed checkpoint/login handling are implemented. Historical manual-login IPC remains disabled, not a hidden fallback.
+
+Python root source also uses cookie login with Windows DPAPI. The older bundled Python downloads are historical artifacts; source changes do not rebuild those binaries.
+
+**Live Facebook E2E has not passed. Not production-ready.** Local unit, database, browser fixture and packaged desktop checks are separate from live verification. No real cookie/token/profile is part of the tests or committed sources.
+
+See [module API, replacement map, files and verification instructions](COOKIE_LOGIN.md).
+
+---
+
+The following sections are historical implementation snapshots, not current readiness claims.
+
 # Implementation status
 
 ## 0.5.0 queue safety and verification update

@@ -165,6 +165,7 @@ function AccountsView({ accounts, destinations, mutate }: { accounts: Account[];
   const [showDestination, setShowDestination] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
   const [showFacebookLogin, setShowFacebookLogin] = useState(false);
+  const [cookieAccountId, setCookieAccountId] = useState("");
   const [backup, setBackup] = useState<"export" | "import" | null>(null);
   const [selected, setSelected] = useState(accounts[0]?.id || "");
   const [editingName, setEditingName] = useState(false);
@@ -176,12 +177,12 @@ function AccountsView({ accounts, destinations, mutate }: { accounts: Account[];
          <div className="session-summary"><b>{account.name}</b><span>ชื่อ Facebook: {account.facebookName || "ยังยืนยันไม่ได้"}</span><span>ประเภท: {account.facebookActorType === "profile" ? "บัญชีส่วนตัว" : account.facebookActorType === "page" ? "เพจ" : "ยังไม่ยืนยัน"}</span><span>สถานะ: {({ online: "ออนไลน์", expired: "หมดอายุ", restricted: "ถูกจำกัด", checkpoint: "ต้องยืนยันตัวตน", disabled: "ถูกปิดใช้งาน", unknown: "ยังไม่ทราบ" } as Record<string, string>)[account.sessionStatus || "unknown"]} · ตรวจล่าสุด {account.lastCheckedAt ? formatThaiTime(account.lastCheckedAt) : "ยังไม่เคยตรวจ"} · {account.status === "paused" ? "บัญชีถูกพักการโพสต์" : account.statusMessage}</span>{account.status === "paused" && <span className="session-paused-warning">บัญชีถูกพักการโพสต์ กรุณาตรวจเครือข่ายและ Session ก่อนตัดสินใจเริ่มงานใหม่</span>}</div>
         {!editingName ? <button className="secondary small session-rename" onClick={() => { setAccountName(account.name); setEditingName(true); }}>เปลี่ยนชื่อที่แสดงในโปรแกรม</button> : <form className="session-rename-form" onSubmit={e => { e.preventDefault(); void mutate(() => window.autopost.renameAccount(account.id, accountName)).then(ok => { if (ok) setEditingName(false); }); }}><label>ชื่อบัญชี<input value={accountName} maxLength={80} required onChange={e => setAccountName(e.target.value)}/></label><button className="primary small" disabled={!accountName.trim()}>บันทึก</button><button type="button" className="secondary small" onClick={() => setEditingName(false)}>ยกเลิก</button></form>}
         <details className="account-profile-settings"><summary>โปรไฟล์ข้อความและแชร์คู่กับงานโพสต์</summary><MessageProfiles accounts={accounts} destinations={destinations} accountOnly={account.id}/></details>
-        <div className="session-action-grid"><button className="primary" onClick={() => void mutate(() => window.autopost.checkSession(account.id))}>ตรวจสอบสถานะ</button><button className="secondary" onClick={() => void mutate(() => window.autopost.loginAndCheckFacebook(account.id))}>เข้าสู่ระบบด้วย Chrome</button></div>
+        <div className="session-action-grid"><button className="primary" onClick={() => void mutate(() => window.autopost.checkSession(account.id))}>ตรวจสอบสถานะ</button><button className="secondary" onClick={() => { setCookieAccountId(account.id); setShowFacebookLogin(true); }}>เข้าด้วย cookie / เปลี่ยน Session</button></div>
         <details className="session-more"><summary>จัดการ Session และข้อมูลสำรอง</summary><div className="session-action-grid"><button className="secondary" onClick={() => void mutate(() => window.autopost.copyCookie(account.id))}>คัดลอก Cookie (ล้างใน 45 วินาที)</button><button className="secondary" onClick={() => setBackup("export")}>สำรอง Session</button><button className="secondary" onClick={() => setBackup("import")}>กู้คืน Session</button><label><input type="checkbox" checked={!!account.headless} onChange={e => void mutate(() => window.autopost.setHeadless(account.id, e.target.checked))}/> ตรวจแบบไม่แสดงหน้าต่าง</label></div><small>หยุดคิวก่อนตรวจสอบหรือลบ Session</small><button className="danger" onClick={() => void mutate(() => window.autopost.deleteSession(account.id))}>ลบ Session และข้อมูลบัญชี</button></details>
       </div>)}
       {!accounts.some(a => a.id === selected && a.platform === "facebook") && <p className="form-hint">เลือกบัญชี Facebook เพื่อดูสถานะ Session</p>}
     </div>
-    {showFacebookLogin && <FacebookLoginModal accounts={accounts} select={setSelected} close={() => { setShowFacebookLogin(false); void mutate(async () => undefined); }}/ >}
+    {showFacebookLogin && <FacebookLoginModal initialId={cookieAccountId} accounts={accounts} select={setSelected} close={() => { setShowFacebookLogin(false); void mutate(async () => undefined); }}/ >}
     {backup && <SessionBackupModal mode={backup} accountId={selected} close={() => { setBackup(null); void mutate(async () => undefined); }}/ >}
     <div className="panel"><div className="panel-title"><div><h2>บัญชี</h2><p>{accounts.length} บัญชี</p></div><button className="primary small" onClick={() => setShowAccount(true)}><Plus/>เพิ่มบัญชี</button></div>
       <div className="account-list">{accounts.map(account => <button key={account.id} className={`account-row ${selected === account.id ? "selected" : ""}`} onClick={() => { setSelected(account.id); setEditingName(false); }}>
@@ -192,45 +193,25 @@ function AccountsView({ accounts, destinations, mutate }: { accounts: Account[];
       <div className="destination-list">{destinations.filter(d => d.accountId === selected).map(dest => <div className="destination-row" key={dest.id}><div><b>{dest.name}</b><span>{dest.kind} · {dest.url || dest.remoteId}</span></div><button className="danger-icon" onClick={() => void mutate(() => window.autopost.deleteDestination(dest.id))}><Trash2/></button></div>)}</div>
       {accounts.find(a => a.id === selected)?.platform === "facebook" && <div className="facebook-tools"><button className="primary" onClick={() => setShowGroups(true)}>ดึงกลุ่มของฉัน</button></div>}
     </div>
-    {showAccount && <AccountModal close={() => setShowAccount(false)} openFacebook={() => { setShowAccount(false); setShowFacebookLogin(true); }} save={(input) => mutate(() => window.autopost.createAccount(input)).then(ok => { if (ok) setShowAccount(false); })}/>}
+    {showAccount && <AccountModal close={() => setShowAccount(false)} openFacebook={() => { setShowAccount(false); setCookieAccountId(""); setShowFacebookLogin(true); }} save={(input) => mutate(() => window.autopost.createAccount(input)).then(ok => { if (ok) setShowAccount(false); })}/>}
     {showDestination && accounts.some(a => a.id === selected) && <DestinationModal account={accounts.find(a => a.id === selected)!} close={() => setShowDestination(false)} save={(input) => mutate(() => window.autopost.createDestination(input)).then(ok => { if (ok) setShowDestination(false); })}/>}
     {showGroups && accounts.some(a => a.id === selected) && <GroupsModal account={accounts.find(a => a.id === selected)!} close={() => setShowGroups(false)} save={(groups) => mutate(async () => { for (const group of groups) await window.autopost.createDestination({ accountId: selected, kind: "facebook_group", name: group.name, url: group.url }); }).then(ok => { if (ok) setShowGroups(false); })}/>}
   </div>;
 }
 
-function FacebookLoginModal({ close, accounts, select }: { close(): void; accounts: Account[]; select(id: string): void }) {
-  const [method, setMethod] = useState<"browser" | "cookie">("browser");
-  const [existingId, setExistingId] = useState("");
+function FacebookLoginModal({ close, accounts, select, initialId }: { close(): void; accounts: Account[]; select(id: string): void; initialId: string }) {
+  const [existingId, setExistingId] = useState(initialId);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const facebookAccounts = accounts.filter(account => account.platform === "facebook");
-  const login = async () => {
-    if (!existingId && !name.trim()) { setMessage("กรุณาตั้งชื่อบัญชีในโปรแกรมก่อนดำเนินการ"); return; }
-    setBusy(true); setMessage("");
-    try {
-      setMessage("เปิด Chrome แล้ว กรุณาล็อกอินด้วยตนเอง จากนั้นปิดหน้าต่าง Chrome เพื่อให้ตรวจสอบสถานะบัญชี");
-      const output = existingId ? { accountId: existingId, session: await window.autopost.loginAndCheckFacebook(existingId) } : await window.autopost.createAndLoginFacebook(name.trim());
-      select(output.accountId);
-      const result = output.session;
-      setMessage(`ตรวจสอบสถานะบัญชี: ${result.status === "online" ? "ออนไลน์" : result.message} · Facebook: ${result.identity?.name || "ยังไม่ยืนยันชื่อ"} · ${result.identity?.actorType === "profile" ? "บัญชีส่วนตัว" : "ยังไม่ยืนยันประเภท"} · ${result.message}`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "ล็อกอินไม่สำเร็จ"); }
-    finally { setBusy(false); }
-  };
-  return <Modal title="เพิ่ม / เข้าสู่ระบบ Facebook" close={() => { if (!busy) close(); }}><div className="fields">
-    <p>เลือกวิธีเข้าสู่ระบบ ทั้งสองวิธีใช้บัญชีและหน้าตรวจสถานะเดียวกัน ไม่ต้องส่งรหัสผ่านหรือ Cookie ในแชต</p>
-    <label>วิธีเข้าสู่ระบบ<select value={method} disabled={busy} onChange={e => setMethod(e.target.value as "browser" | "cookie")}><option value="browser">ปกติ — Chrome (บัญชีหรือเพจ)</option><option value="cookie">Cookie — บัญชีหรือเพจ</option></select></label>
-    <label>บัญชี<select value={existingId} disabled={busy} onChange={e => setExistingId(e.target.value)}><option value="">สร้างบัญชี Facebook ใหม่</option>{facebookAccounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-    {!existingId && <label>ชื่อบัญชีในโปรแกรม<input value={name} maxLength={80} disabled={busy} onChange={e => setName(e.target.value)} placeholder="เช่น Facebook ร้านหลัก"/></label>}
-    {method === "browser" ? <>
-      <p>เมื่อเข้าสู่ระบบเสร็จ ปิดหน้าต่าง Chrome แล้วโปรแกรมจะตรวจสถานะ ชื่อ รูป และประเภทที่ยืนยันได้</p>
-      <button className="primary" type="button" disabled={busy || (!existingId && !name.trim())} onClick={() => void login()}>{busy ? "รอปิด Chrome และตรวจสถานะ…" : "เปิด Chrome เพื่อล็อกอิน"}</button>
-    </> : <CookieImportForm existingId={existingId} name={name.trim()} onImported={rows => { if (rows.length) select(rows[0].accountId); }}/ >}
-    {message && <p role="status">{message}</p>}
+  return <Modal title="เข้าด้วย cookie" close={() => { if (!busy) close(); }}><div className="fields">
+    <p>วาง Cookie ของบัญชีคุณ โปรแกรมตรวจ Session ก่อนเริ่มงาน ไม่ต้องกรอกรหัสผ่านในแอป หากพบ login / checkpoint จะหยุดทันที ไม่ข้ามการยืนยัน</p>
+    <label>บัญชี<select value={existingId} disabled={busy} onChange={e => setExistingId(e.target.value)}><option value="">สร้าง / อัปเดตบัญชีตาม c_user อัตโนมัติ</option>{accounts.filter(account => account.platform === "facebook").map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+    {!existingId && <label>ชื่อบัญชีในโปรแกรม (ไม่บังคับ)<input value={name} maxLength={80} disabled={busy} onChange={e => setName(e.target.value)} placeholder="เช่น Facebook ร้านหลัก"/></label>}
+    <CookieImportForm existingId={existingId} name={name.trim()} onBusy={setBusy} onImported={rows => { if (rows.length) select(rows[0].accountId); }}/>
   </div></Modal>;
 }
 
-function CookieImportForm({ onImported, existingId, name }: { onImported(rows: { accountId: string; status: string; message: string }[]): void; existingId: string; name: string }) {
+function CookieImportForm({ onImported, existingId, name, onBusy }: { onBusy(busy: boolean): void; onImported(rows: { accountId: string; status: string; message: string }[]): void; existingId: string; name: string }) {
   const [progress, setProgress] = useState<{ current: number; total: number; status: string } | null>(null);
   useEffect(() => window.autopost.onSessionProgress(setProgress), []);
   const [input, setInput] = useState("");
@@ -240,23 +221,23 @@ function CookieImportForm({ onImported, existingId, name }: { onImported(rows: {
   const [results, setResults] = useState<{ accountId: string; status: string; message: string }[]>([]);
   const preview = async () => {
     try { setError(""); setCount((await window.autopost.previewCookies(input)).length); }
-    catch { setCount(null); setError("ตรวจรูปแบบไม่ได้ กรุณาตรวจ c_user, xs และใช้ ---ACCOUNT--- คั่นบัญชี"); }
+    catch { setCount(null); setError("missing_c_user_or_xs / invalid_cookie · ตรวจ c_user, xs และใช้ ---ACCOUNT--- คั่นบัญชี"); }
   };
   const login = async () => {
-    setBusy(true); setError(""); setResults([]);
+    setBusy(true); onBusy(true); setError(""); setResults([]);
     try { const rows = existingId ? [await window.autopost.importCookieForAccount(existingId, input)] : await window.autopost.importCookies(input, name); setResults(rows); onImported(rows); setInput(""); setCount(null); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "นำเข้าไม่สำเร็จ กรุณาตรวจรูปแบบ Cookie"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); onBusy(false); setInput(""); setCount(null); }
   };
   return <div className="fields">
-    <p>ใช้เฉพาะ Cookie บัญชีของคุณ รองรับ JSON / Netscape / Raw {existingId ? "เลือกบัญชีเดิมจะตรวจหนึ่งชุดและไม่ทับ Session เดิม" : "หลายบัญชีคั่นด้วย ---ACCOUNT---"}</p>
-    <textarea rows={12} value={input} autoComplete="off" spellCheck={false} disabled={busy} onChange={e => { setInput(e.target.value); setCount(null); }} placeholder="วาง Cookie ที่นี่ (ไม่บันทึกลง Log)"/>
+    <p>ใช้เฉพาะ Cookie บัญชีของคุณ รองรับ JSON / Netscape / Raw {existingId ? "เลือกบัญชีเดิมจะเปลี่ยน Cookie เฉพาะ c_user เดียวกันและหยุดคิวก่อน" : "หลายบัญชีคั่นด้วย ---ACCOUNT---"}</p>
+    <label>Cookie string / Cookie-Editor JSON<textarea rows={6} value={input} autoComplete="off" spellCheck={false} disabled={busy} onChange={e => { setInput(e.target.value); setCount(null); }} placeholder="c_user=…; xs=…; (ไม่บันทึกลง Log)"/></label>
     <button className="secondary" disabled={busy || !input.trim()} onClick={() => void preview()}>ตรวจจำนวนบัญชี</button>
     {count !== null && <p>ตรวจพบ {count} บัญชี</p>}
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">กำลังตรวจสอบบัญชี {progress?.current || 0}/{progress?.total || count || 0} กรุณารอสักครู่…<progress value={progress?.current || 0} max={progress?.total || count || 1}/></p>}
-    {results.map(row => <p key={row.accountId}>{row.status}: {row.message}</p>)}
-    <button className="primary" disabled={busy || !count || (!existingId && !name)} onClick={() => void login()}>Login / สร้างบัญชี</button>
+    {results.map(row => <p role="status" key={row.accountId}>{row.status === "online" ? "สำเร็จ" : "ไม่สำเร็จ"}: {row.message}</p>)}
+    <button className="primary" disabled={busy || !input.trim()} onClick={() => void login()}>เข้าด้วย cookie</button>
   </div>;
 }
 
@@ -290,13 +271,13 @@ function SessionBackupModal({ mode, accountId, close }: { mode: "export" | "impo
 function AccountModal({ close, openFacebook, save }: { close(): void; openFacebook(): void; save(input: { name: string; adapterType: AdapterType; secret?: string }): Promise<void> }) {
   const [name, setName] = useState(""); const [type, setType] = useState<AdapterType>("facebook-browser"); const [secret, setSecret] = useState("");
   return <Modal title="เพิ่มบัญชี" close={close}><div className="fields">
-    <label>แพลตฟอร์ม<select value={type} onChange={e => setType(e.target.value as AdapterType)}><option value="facebook-browser">Facebook — Chrome หรือ Cookie</option><option value="discord-webhook">Discord Webhook</option><option value="discord-bot">Discord Bot</option></select></label>
-    {type === "facebook-browser" ? <p>เลือกวิธีล็อกอินในขั้นถัดไป แล้วตรวจสถานะและชื่อ Facebook จาก Session</p> : <form onSubmit={e => { e.preventDefault(); void save({ name, adapterType: type, secret }); }}>
+    <label>แพลตฟอร์ม<select value={type} onChange={e => setType(e.target.value as AdapterType)}><option value="facebook-browser">Facebook — Cookie</option><option value="discord-webhook">Discord Webhook</option><option value="discord-bot">Discord Bot</option></select></label>
+    {type === "facebook-browser" ? <p>วาง Cookie ในขั้นถัดไป โปรแกรมตรวจ Session ก่อนเริ่มงาน</p> : <form onSubmit={e => { e.preventDefault(); void save({ name, adapterType: type, secret }); }}>
       <label>ชื่อบัญชี<input value={name} onChange={e => setName(e.target.value)} required placeholder="เช่น Discord ร้านหลัก"/></label>
       <label>{type === "discord-bot" ? "Bot Token" : "Webhook URL"}<input type="password" value={secret} onChange={e => setSecret(e.target.value)} required/></label>
       <div className="modal-actions"><button type="button" className="secondary" onClick={close}>ยกเลิก</button><button className="primary">บันทึกบัญชี Discord</button></div>
     </form>}
-    {type === "facebook-browser" && <div className="modal-actions"><button type="button" className="secondary" onClick={close}>ยกเลิก</button><button type="button" className="primary" onClick={openFacebook}>เลือกวิธีล็อกอิน Facebook</button></div>}
+    {type === "facebook-browser" && <div className="modal-actions"><button type="button" className="secondary" onClick={close}>ยกเลิก</button><button type="button" className="primary" onClick={openFacebook}>เข้าด้วย cookie</button></div>}
   </div></Modal>;
 }
 
@@ -346,7 +327,7 @@ function GroupsModal({ account, close, save }: { account: Account; close(): void
         }).catch(error => setFailure(error instanceof Error ? error.message : "ลบกลุ่มไม่สำเร็จ")).finally(() => setDeleting(null));
       }}>{deleting === group.id ? "⏳ กำลังลบ…" : "🗑️ ลบจากรายการ"}</button>
     </div>)}</div>}
-    {!loading && !failure && !groups.length && <div className="empty">ไม่พบกลุ่ม ลองเปิด Chrome และตรวจว่าบัญชีล็อกอินอยู่</div>}
+    {!loading && !failure && !groups.length && <div className="empty">ไม่พบกลุ่ม ตรวจสถานะ Cookie หรือนำเข้า Cookie ใหม่</div>}
     <div className="modal-actions"><span className="selection-count">✅ เลือก {selected.size} กลุ่ม</span><button className="secondary" onClick={close}>ยกเลิก</button><button className="primary" disabled={!selected.size} onClick={() => void save(groups.filter(g => selected.has(g.id)))}>➕ เพิ่มกลุ่มที่เลือก</button></div>
   </div></Modal>;
 }
@@ -520,7 +501,7 @@ function SettingsView({ worker, mutate }: { worker: boolean; mutate(action: () =
   useEffect(() => { void window.autopost.getAutoStart().then(setAutoStart); }, []);
   return <div className="settings-grid"><div className="panel setting"><div><h2>ระบบคิวเบื้องหลัง</h2><p>ตรวจงานที่ถึงเวลาทุก 1 วินาที และทำงานพร้อมกันสูงสุด 2 บัญชี</p></div><button className={worker ? "danger" : "primary"} onClick={() => void mutate(() => worker ? window.autopost.stopWorker() : window.autopost.startWorker())}>{worker ? <><LogOut/>หยุดคิว</> : <><Wifi/>เริ่มคิว</>}</button></div>
     <div className="panel setting"><div><h2>เปิดพร้อม Windows</h2><p>เริ่มโปรแกรมไว้ใน System Tray เพื่อให้งานตามเวลาทำงานได้</p></div><label className="toggle"><input type="checkbox" checked={autoStart} onChange={e => { const value=e.target.checked; void window.autopost.setAutoStart(value).then(setAutoStart); }}/><span/></label></div>
-    <div className="panel notice"><h2>ความปลอดภัย</h2><ul><li>Facebook ล็อกอินด้วย Chrome profile แยกของแต่ละบัญชี</li><li>Bot Token และ Webhook เข้ารหัสด้วย Windows DPAPI</li><li>ไม่เก็บรหัสผ่าน Facebook และไม่ bypass CAPTCHA</li><li>ไม่ทำ fingerprint spoof หรือหลบระบบตรวจจับ</li></ul></div>
+    <div className="panel notice"><h2>ความปลอดภัย</h2><ul><li>Facebook เข้าด้วย Cookie ใช้โปรไฟล์แยกตาม c_user บนเครื่องเท่านั้น</li><li>Bot Token และ Webhook เข้ารหัสด้วย Windows DPAPI</li><li>ไม่เก็บรหัสผ่าน Facebook และไม่ bypass CAPTCHA</li><li>ไม่ทำ fingerprint spoof หรือหลบระบบตรวจจับ</li></ul></div>
     <div className="panel notice"><h2>ข้อจำกัด Facebook</h2><p>Facebook เปลี่ยนโครงสร้างหน้าเว็บได้ตลอด หากตัวเลือกหน้าเว็บเปลี่ยน งานจะหยุดพร้อมบันทึกภาพหน้าจอไว้ตรวจสอบ การโพสต์ผ่านเพจควรใช้ Meta Graph API เมื่อพร้อมตั้งค่าแอป Meta</p></div>
   </div>;
 }

@@ -21,19 +21,16 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
   self.assertNotEqual(self.account['id'],other['id'])
   self.assertEqual([a['name'] for a in self.manager.accounts()],['Veltshop','Other'])
   with self.assertRaises(ValueError):self.manager.account('..')
- async def test_login_opens_facebook_and_never_reads_password(self):
-  page=AsyncMock()
-  with patch.object(self.manager,'session',new=AsyncMock(return_value=page)):
-   await self.manager.login(self.account['id'])
-  page.goto.assert_awaited_once_with('https://www.facebook.com/',wait_until='domcontentloaded',timeout=60000)
-  page.bring_to_front.assert_awaited_once()
- async def test_session_probe_exposes_no_cookies(self):
-  page=MagicMock();page.is_closed.return_value=False
-  ctx=AsyncMock();ctx.cookies.return_value=[{'name':'c_user','value':'private'}]
+ async def test_manual_login_is_disabled(self):
+  with patch.object(self.manager,'session',new=AsyncMock()) as session:
+   with self.assertRaisesRegex(ValueError,'manual_login_disabled'):await self.manager.login(self.account['id'])
+   session.assert_not_awaited()
+ async def test_session_probe_uses_verifier_and_exposes_no_cookies(self):
+  page=MagicMock();page.is_closed.return_value=False;ctx=AsyncMock()
   self.manager.sessions[self.account['id']]=(AsyncMock(),ctx,page)
-  self.assertTrue(await self.manager.check(self.account['id']))
-  self.assertNotIn('private',str(self.manager.accounts()))
-  self.manager.sessions.clear()
+  with patch('autopost.browser_manager.inspect_session',new=AsyncMock(return_value=None)) as inspect:
+   self.assertTrue(await self.manager.check(self.account['id']));inspect.assert_awaited_once()
+  self.assertNotIn('fixture-only',str(self.manager.accounts()));self.manager.sessions.clear()
  async def test_group_url_validation(self):
   for url in ['http://facebook.com/groups/123','https://facebook.com.evil.com/groups/123','https://facebook.com/groups/123/posts/45','https://user@facebook.com/groups/123']:
    with self.assertRaises(ValueError):self.manager.group_url(url)

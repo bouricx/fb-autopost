@@ -1,3 +1,9 @@
+## Cookie login update (Electron 0.7.1 / Python root source)
+
+Facebook now uses cookie-first authentication. Manual-login entry points are explicitly disabled. Cookies stay in local safeStorage/DPAPI; private profiles are outside the repository. Login/checkpoint gates stop the operation without bypass or submission retry.
+
+[Full module, integration map, run commands and verification limits](electron-manager-th/docs/COOKIE_LOGIN.md). **Live Facebook E2E is pending; not production-ready.** Historical Python binaries under downloads are not rebuilt by this source update.
+
 # FB AutoPost 1.3.1 — Desktop
 
 ## AutoPost Manager TH — Electron edition 0.5.0

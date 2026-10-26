@@ -11,6 +11,11 @@ jobs:
       - name: Unpack the shipped Windows runtime
         shell: pwsh
         run: Expand-Archive -LiteralPath downloads/FB-AutoPost-Windows-x64.zip -DestinationPath "$env:RUNNER_TEMP/fb-desktop"
+      - name: Verify Python source and DPAPI cookie fixtures
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP/fb-desktop/FB-AutoPost/runtime/python.exe" -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify native window and occupied-port recovery
         shell: pwsh
         run: |
