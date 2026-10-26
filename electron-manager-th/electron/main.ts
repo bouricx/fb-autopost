@@ -353,7 +353,7 @@ function registerIpc(profilesDir: string) {
   ipcMain.handle("accounts:preview-cookies", (_event, input: unknown) => parseCookies(z.string().max(2_000_000).parse(input)).map(item => ({ userId: item.userId, format: item.format })));
   ipcMain.handle("accounts:import-cookies", (event, input: unknown, name: unknown) => manager.importMultipleCookies(z.string().max(2_000_000).parse(input), progress => {
     if (!event.sender.isDestroyed()) event.sender.send("accounts:session-progress", progress);
-  }, name === undefined ? undefined : z.string().trim().min(1).max(80).parse(name)));
+  }, name === undefined || typeof name === "string" && !name.trim() ? undefined : z.string().trim().min(1).max(80).parse(name)));
   ipcMain.handle("accounts:check-session", (_event, id: unknown) => manager.checkSession(accountId(id)));
   ipcMain.handle("accounts:login-and-check", (_event, id: unknown) => manager.loginWithBrowser(accountId(id)));
   ipcMain.handle("accounts:create-and-login", (_event, name: unknown) => manager.createAndLoginWithBrowser(z.string().trim().min(1).max(80).parse(name)));

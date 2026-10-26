@@ -225,7 +225,7 @@ function CookieImportForm({ onImported, existingId, name, onBusy }: { onBusy(bus
   };
   const login = async () => {
     setBusy(true); onBusy(true); setError(""); setResults([]);
-    try { const rows = existingId ? [await window.autopost.importCookieForAccount(existingId, input)] : await window.autopost.importCookies(input, name); setResults(rows); onImported(rows); setInput(""); setCount(null); }
+    try { const rows = existingId ? [await window.autopost.importCookieForAccount(existingId, input)] : await window.autopost.importCookies(input, name || undefined); setResults(rows); onImported(rows); setInput(""); setCount(null); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "นำเข้าไม่สำเร็จ กรุณาตรวจรูปแบบ Cookie"); }
     finally { setBusy(false); onBusy(false); setInput(""); setCount(null); }
   };

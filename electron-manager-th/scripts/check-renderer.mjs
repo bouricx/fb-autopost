@@ -8,7 +8,7 @@ await page.addInitScript(()=>{
  window.autopost=new Proxy({}, {get:(_,key)=>{
   if(key==='onProgress'||key==='onSessionProgress')return callback=>{events.push(callback);return ()=>{};};
   return async(...args)=>{
-   if(key==='importCookies') {if(!String(args[0]).includes('xs='))throw new Error('missing_c_user_or_xs');return [{accountId:account.id,status:'online',message:'verified local fixture'}];}
+   if(key==='importCookies') {if(args[1]==='')throw new Error('empty_name_is_not_optional');if(!String(args[0]).includes('xs='))throw new Error('missing_c_user_or_xs');return [{accountId:account.id,status:'online',message:'verified local fixture'}];}
    if(key==='listAccounts')return [account];
    if(key==='listDestinations')return [{id:'22222222-2222-4222-8222-222222222222',accountId:account.id,name:'Veltshop community',kind:'facebook_group',url:'https://www.facebook.com/groups/123/',enabled:true}];
    if(key==='dashboard')return {pending:0,running:0,succeeded:0,failed:0,accounts:1,successRate:0,nextJobs:[]};
