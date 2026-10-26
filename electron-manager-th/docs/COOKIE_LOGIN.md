@@ -93,6 +93,8 @@ node --check ui/app.js
 
 Tests use fabricated cookies only. Browser requests are intercepted with local fixtures; no Facebook account is contacted. Covered: parser/core/conversion, clearing stale cookies, success ownership, login/checkpoint closure, CAPTCHA, wrong identity, rejected session, launch failures, explicit account replacement, batch stop, encrypted storage restoration and legacy-entry-point blocking. Windows CI also exercises DPAPI roundtrip with fabricated data and the packaged Electron cookie dialog.
 
+ผลทดสอบและหลักฐาน: [COOKIE_LOGIN_VERIFICATION.md](COOKIE_LOGIN_VERIFICATION.md).
+
 ## Pending verification
 
 Live Facebook login → identity → group discovery → scheduled send → verified result still requires an authorized account. CAPTCHA/checkpoint/2FA are never bypassed. A cookie can expire or be revoked at any time. Selectors may reject legitimate layouts; rejection must stay visible rather than be turned into a success. No production-ready claim until live E2E passes.
